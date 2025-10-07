@@ -1,0 +1,23 @@
+name = "Quic"
+uuid = "e87bf339-ccdf-4a5f-9274-4a3c1e6e3c8f"
+authors = ["Alice"]
+version = "0.1.0"
+
+[deps]
+CRC32c = "8bf52ea8-c179-5cab-976a-9e18b702a9bc"
+ChaChaCiphers = "f23b13a2-9352-431b-a28a-b2f20c485fa1"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+MbedTLS = "739be429-bea8-5141-9913-cc70e7f3736d"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+Sodium = "4f5b5e99-b0ad-42cd-b47a-334e172ec8bd"
+Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
+
+[compat]
+ChaChaCiphers = "0.3.0"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
