@@ -4,7 +4,7 @@ module Quic
 export Endpoint, Connection, Config
 export connect, accept, send_stream, recv_stream
 
-# submodules
+# submodules - core QUIC
 include("protocol.jl")
 include("packet.jl")
 include("frame.jl")
@@ -29,5 +29,11 @@ include("packet_receiver.jl")
 include("endpoint.jl")
 include("congestion.jl")
 include("transport.jl")
+
+# JAM networking protocol (JAMNP-S)
+include("jamnps.jl")
+
+# FFI bindings to quiche (optional, for comparison/production use)
+include("quiche_ffi.jl")
 
 end # module
