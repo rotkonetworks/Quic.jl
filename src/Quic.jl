@@ -4,6 +4,9 @@ module Quic
 export Endpoint, Connection, Config
 export connect, accept, send_stream, recv_stream
 
+# Logging (load first for use by other modules)
+include("logging.jl")
+
 # submodules - core QUIC
 include("protocol.jl")
 include("packet.jl")

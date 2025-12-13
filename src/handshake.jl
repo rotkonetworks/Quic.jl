@@ -353,8 +353,6 @@ function create_key_share_extension(hs::HandshakeState)
     append!(ext, [UInt8((length(ks_data) >> 8) & 0xff), UInt8(length(ks_data) & 0xff)])
     append!(ext, ks_data)
 
-    println("X25519 public key generated: $(bytes2hex(public_key))")
-
     return ext
 end
 

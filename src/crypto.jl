@@ -3,7 +3,22 @@ module Crypto
 using SHA
 using Random
 using MbedTLS
-using ChaChaCiphers
+using Libdl
+
+# libsodium constants for ChaCha20-Poly1305 IETF
+const CHACHA20_POLY1305_KEYBYTES = 32
+const CHACHA20_POLY1305_NONCEBYTES = 12
+const CHACHA20_POLY1305_TAGBYTES = 16
+
+# Load libsodium once
+const _libsodium = Ref{Ptr{Nothing}}(C_NULL)
+function get_libsodium()
+    if _libsodium[] == C_NULL
+        _libsodium[] = dlopen("libsodium")
+        ccall(dlsym(_libsodium[], :sodium_init), Cint, ())
+    end
+    return _libsodium[]
+end
 
 # Simple HMAC-SHA256 implementation
 function hmac_sha256(key::Vector{UInt8}, data::Vector{UInt8})::Vector{UInt8}
@@ -164,9 +179,11 @@ function encrypt_payload(payload::Vector{UInt8}, key::Vector{UInt8}, iv::Vector{
     return encrypt_payload(ctx, payload, key, iv, packet_number, associated_data)
 end
 
-# encrypt with ChaCha20-Poly1305
+# encrypt with ChaCha20-Poly1305 using libsodium
 function encrypt_chacha20_poly1305(payload::Vector{UInt8}, key::Vector{UInt8}, iv::Vector{UInt8},
                                    packet_number::UInt64, associated_data::Vector{UInt8})
+    lib = get_libsodium()
+
     # construct nonce by XORing IV with packet number
     nonce = copy(iv)
     pn_bytes = zeros(UInt8, 12)
@@ -176,21 +193,23 @@ function encrypt_chacha20_poly1305(payload::Vector{UInt8}, key::Vector{UInt8}, i
         nonce[i] ⊻= pn_bytes[i]
     end
 
-    # create ChaCha20-Poly1305 cipher
-    cipher = ChaChaCiphers.ChaCha20Poly1305(key, nonce)
+    # output buffer: ciphertext + tag
+    ciphertext = Vector{UInt8}(undef, length(payload) + CHACHA20_POLY1305_TAGBYTES)
+    ciphertext_len = Ref{Culonglong}(0)
 
-    # authenticate additional data
-    ChaChaCiphers.update_aad!(cipher, associated_data)
+    # Call libsodium crypto_aead_chacha20poly1305_ietf_encrypt
+    ret = ccall(
+        dlsym(lib, :crypto_aead_chacha20poly1305_ietf_encrypt),
+        Cint,
+        (Ptr{UInt8}, Ptr{Culonglong}, Ptr{UInt8}, Culonglong, Ptr{UInt8}, Culonglong, Ptr{Nothing}, Ptr{UInt8}, Ptr{UInt8}),
+        ciphertext, ciphertext_len, payload, length(payload), associated_data, length(associated_data), C_NULL, nonce, key
+    )
 
-    # encrypt and authenticate
-    ciphertext = similar(payload)
-    ChaChaCiphers.encrypt!(ciphertext, cipher, payload)
+    if ret != 0
+        error("ChaCha20-Poly1305 encryption failed")
+    end
 
-    # get authentication tag
-    tag = ChaChaCiphers.compute_tag(cipher)
-
-    # append tag to ciphertext
-    return [ciphertext; tag]
+    return ciphertext
 end
 
 # encrypt payload with AES-GCM using MbedTLS GCM API
@@ -232,16 +251,14 @@ function decrypt_payload(ciphertext_with_tag::Vector{UInt8}, key::Vector{UInt8},
     return decrypt_payload(ctx, ciphertext_with_tag, key, iv, packet_number, associated_data)
 end
 
-# decrypt with ChaCha20-Poly1305
+# decrypt with ChaCha20-Poly1305 using libsodium
 function decrypt_chacha20_poly1305(ciphertext_with_tag::Vector{UInt8}, key::Vector{UInt8}, iv::Vector{UInt8},
                                    packet_number::UInt64, associated_data::Vector{UInt8})
-    if length(ciphertext_with_tag) < 16
+    lib = get_libsodium()
+
+    if length(ciphertext_with_tag) < CHACHA20_POLY1305_TAGBYTES
         error("Ciphertext too short for authentication tag")
     end
-
-    # separate ciphertext and tag
-    ciphertext = ciphertext_with_tag[1:end-16]
-    tag = ciphertext_with_tag[end-15:end]
 
     # construct nonce
     nonce = copy(iv)
@@ -252,21 +269,21 @@ function decrypt_chacha20_poly1305(ciphertext_with_tag::Vector{UInt8}, key::Vect
         nonce[i] ⊻= pn_bytes[i]
     end
 
-    # create ChaCha20-Poly1305 cipher
-    cipher = ChaChaCiphers.ChaCha20Poly1305(key, nonce)
+    # output buffer for plaintext (ciphertext length minus tag)
+    plaintext_len = length(ciphertext_with_tag) - CHACHA20_POLY1305_TAGBYTES
+    plaintext = Vector{UInt8}(undef, plaintext_len)
+    decrypted_len = Ref{Culonglong}(0)
 
-    # authenticate additional data
-    ChaChaCiphers.update_aad!(cipher, associated_data)
+    # Call libsodium crypto_aead_chacha20poly1305_ietf_decrypt
+    ret = ccall(
+        dlsym(lib, :crypto_aead_chacha20poly1305_ietf_decrypt),
+        Cint,
+        (Ptr{UInt8}, Ptr{Culonglong}, Ptr{Nothing}, Ptr{UInt8}, Culonglong, Ptr{UInt8}, Culonglong, Ptr{UInt8}, Ptr{UInt8}),
+        plaintext, decrypted_len, C_NULL, ciphertext_with_tag, length(ciphertext_with_tag), associated_data, length(associated_data), nonce, key
+    )
 
-    # decrypt
-    plaintext = similar(ciphertext)
-    ChaChaCiphers.decrypt!(plaintext, cipher, ciphertext)
-
-    # verify tag
-    computed_tag = ChaChaCiphers.compute_tag(cipher)
-
-    if tag != computed_tag
-        error("Authentication tag verification failed")
+    if ret != 0
+        error("ChaCha20-Poly1305 decryption/authentication failed")
     end
 
     return plaintext
@@ -359,24 +376,32 @@ function aes_header_protection_mask(hp_key::Vector{UInt8}, sample::Vector{UInt8}
     return mask
 end
 
-# ChaCha20 header protection mask
+# ChaCha20 header protection mask using libsodium
 function chacha20_header_protection_mask(hp_key::Vector{UInt8}, sample::Vector{UInt8})
-    # use first 4 bytes of sample as counter, rest as nonce
-    counter = UInt32(0)
-    for i in 1:4
-        counter = (counter << 8) | sample[i]
+    lib = get_libsodium()
+
+    # use first 4 bytes of sample as counter (big-endian per QUIC spec), rest as nonce
+    counter = UInt32(sample[1]) << 24 | UInt32(sample[2]) << 16 | UInt32(sample[3]) << 8 | UInt32(sample[4])
+
+    nonce = sample[5:16]
+
+    # generate ChaCha20 keystream by encrypting zeros
+    # For header protection we need 5 bytes of keystream
+    # libsodium's crypto_stream_chacha20_ietf_xor_ic handles counter internally
+    plaintext = zeros(UInt8, 5)
+    mask = Vector{UInt8}(undef, 5)
+
+    # Use crypto_stream_chacha20_ietf_xor_ic to encrypt with initial counter
+    ret = ccall(
+        dlsym(lib, :crypto_stream_chacha20_ietf_xor_ic),
+        Cint,
+        (Ptr{UInt8}, Ptr{UInt8}, Culonglong, Ptr{UInt8}, UInt32, Ptr{UInt8}),
+        mask, plaintext, 5, nonce, counter, hp_key
+    )
+
+    if ret != 0
+        error("ChaCha20 header protection mask generation failed")
     end
-
-    nonce = zeros(UInt8, 12)
-    nonce[1:12] = sample[5:16]
-
-    # generate ChaCha20 keystream
-    cipher = ChaChaCiphers.ChaCha20(hp_key, nonce)
-    ChaChaCiphers.seek!(cipher, counter)
-
-    # generate 5 bytes of keystream for mask
-    mask = zeros(UInt8, 5)
-    ChaChaCiphers.encrypt!(mask, cipher, zeros(UInt8, 5))
 
     return mask
 end
