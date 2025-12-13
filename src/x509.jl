@@ -55,13 +55,49 @@ end
 function der_object_identifier(oid::String)
     # Common OIDs
     oids = Dict(
-        "1.2.840.10045.4.3.3" => [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x03],  # Ed25519
+        "1.2.840.10045.4.3.3" => [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x03],  # ECDSA P-384
         "1.3.101.112" => [0x06, 0x03, 0x2b, 0x65, 0x70],  # Ed25519 key
         "2.5.4.3" => [0x06, 0x03, 0x55, 0x04, 0x03],  # commonName
         "2.5.4.6" => [0x06, 0x03, 0x55, 0x04, 0x06],  # countryName
         "2.5.4.10" => [0x06, 0x03, 0x55, 0x04, 0x0a],  # organizationName
+        "2.5.29.17" => [0x06, 0x03, 0x55, 0x1d, 0x11],  # subjectAltName
+        "2.5.29.19" => [0x06, 0x03, 0x55, 0x1d, 0x13],  # basicConstraints
+        "2.5.29.15" => [0x06, 0x03, 0x55, 0x1d, 0x0f],  # keyUsage
     )
     return get(oids, oid, [0x06, 0x00])  # Return empty OID if not found
+end
+
+function der_ia5_string(str::String)
+    bytes = Vector{UInt8}(str)
+    return vcat(0x16, der_length(length(bytes)), bytes)
+end
+
+function der_printable_string(str::String)
+    bytes = Vector{UInt8}(str)
+    return vcat(0x13, der_length(length(bytes)), bytes)
+end
+
+# Create Subject Alternative Name extension for JAMNP-S
+# dNSName is context tag [2]
+function der_san_extension(alt_name::String; critical::Bool=false)
+    # GeneralName with dNSName (context tag [2])
+    name_bytes = Vector{UInt8}(alt_name)
+    dns_name = vcat(0x82, der_length(length(name_bytes)), name_bytes)
+
+    # GeneralNames sequence
+    general_names = der_sequence(dns_name)
+
+    # Extension value (OCTET STRING wrapping the GeneralNames)
+    ext_value = der_octet_string(general_names)
+
+    # Full extension
+    ext = vcat(
+        der_object_identifier("2.5.29.17"),  # subjectAltName OID
+        critical ? [0x01, 0x01, 0xff] : UInt8[],  # optional critical flag
+        ext_value
+    )
+
+    return der_sequence(ext)
 end
 
 function der_utf8_string(str::String)
@@ -78,17 +114,19 @@ function der_time(timestamp::Float64)
 end
 
 # Build X.509v3 certificate for Ed25519
+# For JAMNP-S, pass alt_name derived from Ed25519 public key
 function generate_x509_certificate(keypair::Ed25519.KeyPair;
-                                  subject_cn::String="QuicNet",
-                                  issuer_cn::String="QuicNet",
+                                  subject_cn::String="JAMNPS",
+                                  issuer_cn::String="JAMNPS",
+                                  alt_name::Union{String, Nothing}=nothing,
                                   serial::Int=rand(1:1000000),
                                   validity_days::Int=365)
 
     # Certificate version (v3 = 2)
-    version = der_sequence(vcat(
-        0xa0, 0x03,  # Context tag [0]
+    version = vcat(
+        0xa0, 0x03,  # Context tag [0] EXPLICIT
         der_integer(2)
-    ))
+    )
 
     # Serial number
     serial_number = der_integer(serial)
@@ -129,21 +167,34 @@ function generate_x509_certificate(keypair::Ed25519.KeyPair;
     ))
 
     # Extensions (v3)
+    ext_list = UInt8[]
+
     # Basic Constraints: CA:FALSE
     basic_constraints = der_sequence(vcat(
-        der_object_identifier("2.5.29.19"),  # OID for basic constraints
-        der_octet_string(der_sequence([0x01, 0x01, 0x00]))  # CA:FALSE
+        der_object_identifier("2.5.29.19"),
+        der_octet_string(der_sequence([0x01, 0x01, 0x00]))
     ))
+    append!(ext_list, basic_constraints)
 
-    # Key Usage: Digital Signature, Key Agreement
+    # Key Usage: Digital Signature
     key_usage = der_sequence(vcat(
-        der_object_identifier("2.5.29.15"),  # OID for key usage
-        der_octet_string(der_bit_string([0x88]))  # Digital signature + key agreement
+        der_object_identifier("2.5.29.15"),
+        [0x01, 0x01, 0xff],  # critical: TRUE
+        der_octet_string(der_bit_string([0x80]))  # Digital signature only
     ))
+    append!(ext_list, key_usage)
 
+    # Subject Alternative Name (required for JAMNP-S)
+    if alt_name !== nothing
+        san_ext = der_san_extension(alt_name)
+        append!(ext_list, san_ext)
+    end
+
+    # Wrap extensions in context tag [3]
+    extensions_seq = der_sequence(ext_list)
     extensions = vcat(
-        0xa3, der_length(length(der_sequence(vcat(basic_constraints, key_usage)))),
-        der_sequence(vcat(basic_constraints, key_usage))
+        0xa3, der_length(length(extensions_seq)),
+        extensions_seq
     )
 
     # Build TBS (To Be Signed) certificate
@@ -154,8 +205,8 @@ function generate_x509_certificate(keypair::Ed25519.KeyPair;
         issuer,
         validity,
         subject,
-        public_key_info
-        # extensions  # Skip for simplicity
+        public_key_info,
+        extensions
     ))
 
     # Sign the TBS certificate
@@ -199,5 +250,6 @@ function extract_public_key(cert::Vector{UInt8})
 end
 
 export generate_x509_certificate, generate_certificate_chain, extract_public_key
+export der_san_extension, der_sequence, der_length, der_bit_string, der_octet_string
 
 end # module

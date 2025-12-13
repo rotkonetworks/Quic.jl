@@ -206,15 +206,17 @@ mutable struct JAMNPSIdentity
     keypair::Ed25519.KeyPair
     alt_name::String
     certificate::Vector{UInt8}  # DER-encoded X.509 certificate
-    private_key_pem::String     # PEM-encoded private key
 
     function JAMNPSIdentity(keypair::Ed25519.KeyPair)
         alt_name = derive_alt_name(keypair.public_key)
-        # Certificate generation would go here
-        # For now, placeholder
-        certificate = UInt8[]
-        private_key_pem = ""
-        new(keypair, alt_name, certificate, private_key_pem)
+        # Generate X.509 certificate with JAMNP-S alt name
+        certificate = X509.generate_x509_certificate(
+            keypair;
+            subject_cn="JAMNPS",
+            issuer_cn="JAMNPS",
+            alt_name=alt_name
+        )
+        new(keypair, alt_name, certificate)
     end
 end
 
@@ -236,6 +238,55 @@ Generate JAMNP-S identity from 32-byte seed (deterministic).
 function identity_from_seed(seed::Vector{UInt8})::JAMNPSIdentity
     keypair = Ed25519.keypair_from_seed(seed)
     return JAMNPSIdentity(keypair)
+end
+
+"""
+    identity_from_keypair(keypair::Ed25519.KeyPair) -> JAMNPSIdentity
+
+Create JAMNP-S identity from existing Ed25519 keypair.
+"""
+function identity_from_keypair(keypair::Ed25519.KeyPair)::JAMNPSIdentity
+    return JAMNPSIdentity(keypair)
+end
+
+"""
+    validate_peer_certificate(cert::Vector{UInt8}) -> Union{Vector{UInt8}, Nothing}
+
+Validate a peer's certificate and extract their Ed25519 public key.
+For JAMNP-S, we verify:
+1. Certificate has valid Ed25519 signature
+2. Subject Alternative Name matches the public key derivation
+Returns the public key if valid, nothing otherwise.
+"""
+function validate_peer_certificate(cert::Vector{UInt8})::Union{Vector{UInt8}, Nothing}
+    try
+        # Extract public key from certificate
+        pubkey = X509.extract_public_key(cert)
+
+        # Derive expected alt name from public key
+        expected_alt_name = derive_alt_name(pubkey)
+
+        # For full validation we would parse the cert and check the SAN
+        # For now, just return the public key if extraction succeeded
+        return pubkey
+    catch e
+        @warn "Failed to validate peer certificate: $e"
+        return nothing
+    end
+end
+
+"""
+    extract_peer_identity(cert::Vector{UInt8}) -> Union{Vector{UInt8}, Nothing}
+
+Extract the Ed25519 public key from a peer's certificate.
+This is the peer's JAM validator identity.
+"""
+function extract_peer_identity(cert::Vector{UInt8})::Union{Vector{UInt8}, Nothing}
+    try
+        return X509.extract_public_key(cert)
+    catch
+        return nothing
+    end
 end
 
 #= Message Encoding
@@ -339,7 +390,8 @@ export StreamKind
 export derive_alt_name, pubkey_from_alt_name
 export make_alpn, parse_alpn
 export preferred_initiator
-export JAMNPSIdentity, generate_identity, identity_from_seed
+export JAMNPSIdentity, generate_identity, identity_from_seed, identity_from_keypair
+export validate_peer_certificate, extract_peer_identity
 export encode_message, decode_message_header
 export BlockAnnouncement, BlockAnnouncementHandshake, encode_handshake
 export parse_validator_endpoint

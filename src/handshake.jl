@@ -481,7 +481,375 @@ function complete_handshake(hs::HandshakeState)
     hs.application_keys[:server_iv] = derive_packet_iv(server_app_secret)
 end
 
+#= TLS 1.3 Certificate Message (RFC 8446 Section 4.4.2)
+Structure:
+- Handshake type: 0x0b (Certificate)
+- Length: 3 bytes
+- Certificate request context length: 1 byte (0 for server, can be non-zero for client)
+- Certificate request context: variable
+- Certificate list length: 3 bytes
+- For each certificate:
+  - Certificate length: 3 bytes
+  - Certificate data (DER-encoded X.509)
+  - Extensions length: 2 bytes
+  - Extensions: variable
+=#
+
+"""
+    create_certificate_message(cert_chain::Vector{Vector{UInt8}}; context::Vector{UInt8}=UInt8[])
+
+Create a TLS 1.3 Certificate handshake message.
+cert_chain: Vector of DER-encoded X.509 certificates
+context: Certificate request context (empty for server, may have content for client response)
+"""
+function create_certificate_message(cert_chain::Vector{Vector{UInt8}}; context::Vector{UInt8}=UInt8[])
+    buf = UInt8[]
+
+    # Handshake type: Certificate (11)
+    push!(buf, 0x0b)
+
+    # Length placeholder (3 bytes)
+    len_pos = length(buf) + 1
+    append!(buf, zeros(UInt8, 3))
+
+    # Certificate request context
+    push!(buf, UInt8(length(context)))
+    append!(buf, context)
+
+    # Certificate list
+    cert_list = UInt8[]
+    for cert in cert_chain
+        # Certificate length (3 bytes)
+        cert_len = length(cert)
+        push!(cert_list, UInt8((cert_len >> 16) & 0xff))
+        push!(cert_list, UInt8((cert_len >> 8) & 0xff))
+        push!(cert_list, UInt8(cert_len & 0xff))
+
+        # Certificate data
+        append!(cert_list, cert)
+
+        # Extensions (empty for now)
+        append!(cert_list, [0x00, 0x00])
+    end
+
+    # Certificate list length (3 bytes)
+    list_len = length(cert_list)
+    push!(buf, UInt8((list_len >> 16) & 0xff))
+    push!(buf, UInt8((list_len >> 8) & 0xff))
+    push!(buf, UInt8(list_len & 0xff))
+    append!(buf, cert_list)
+
+    # Update message length
+    msg_len = length(buf) - 4
+    buf[len_pos:len_pos+2] = [
+        UInt8((msg_len >> 16) & 0xff),
+        UInt8((msg_len >> 8) & 0xff),
+        UInt8(msg_len & 0xff)
+    ]
+
+    return buf
+end
+
+#= TLS 1.3 CertificateVerify Message (RFC 8446 Section 4.4.3)
+Structure:
+- Handshake type: 0x0f (CertificateVerify)
+- Length: 3 bytes
+- Signature algorithm: 2 bytes
+- Signature length: 2 bytes
+- Signature: variable
+
+For Ed25519, signature algorithm is 0x0807
+Signature is over:
+  64 spaces (0x20)
+  "TLS 1.3, client CertificateVerify" or "TLS 1.3, server CertificateVerify"
+  0x00
+  Transcript hash
+=#
+
+const TLS13_CV_CLIENT_CONTEXT = b"TLS 1.3, client CertificateVerify"
+const TLS13_CV_SERVER_CONTEXT = b"TLS 1.3, server CertificateVerify"
+const ED25519_SIG_ALGORITHM = [0x08, 0x07]
+
+"""
+    create_certificate_verify_message(keypair::Ed25519.KeyPair, transcript_hash::Vector{UInt8}; is_server::Bool=false)
+
+Create a TLS 1.3 CertificateVerify handshake message with Ed25519 signature.
+"""
+function create_certificate_verify_message(keypair::Ed25519.KeyPair, transcript_hash::Vector{UInt8};
+                                          is_server::Bool=false)
+    buf = UInt8[]
+
+    # Handshake type: CertificateVerify (15)
+    push!(buf, 0x0f)
+
+    # Length placeholder (3 bytes)
+    len_pos = length(buf) + 1
+    append!(buf, zeros(UInt8, 3))
+
+    # Signature algorithm: Ed25519 (0x0807)
+    append!(buf, ED25519_SIG_ALGORITHM)
+
+    # Construct the content to sign
+    # 64 spaces + context string + 0x00 + transcript hash
+    context = is_server ? TLS13_CV_SERVER_CONTEXT : TLS13_CV_CLIENT_CONTEXT
+    to_sign = vcat(
+        fill(0x20, 64),      # 64 spaces
+        context,              # context string
+        [0x00],               # separator
+        transcript_hash       # transcript hash
+    )
+
+    # Sign with Ed25519
+    signature = Ed25519.sign(to_sign, keypair)
+
+    # Signature length (2 bytes)
+    sig_len = length(signature)
+    push!(buf, UInt8((sig_len >> 8) & 0xff))
+    push!(buf, UInt8(sig_len & 0xff))
+
+    # Signature data
+    append!(buf, signature)
+
+    # Update message length
+    msg_len = length(buf) - 4
+    buf[len_pos:len_pos+2] = [
+        UInt8((msg_len >> 16) & 0xff),
+        UInt8((msg_len >> 8) & 0xff),
+        UInt8(msg_len & 0xff)
+    ]
+
+    return buf
+end
+
+#= TLS 1.3 Finished Message (RFC 8446 Section 4.4.4)
+Structure:
+- Handshake type: 0x14 (Finished)
+- Length: 3 bytes
+- Verify data: HMAC of transcript hash
+=#
+
+"""
+    create_finished_message(base_key::Vector{UInt8}, transcript_hash::Vector{UInt8})
+
+Create a TLS 1.3 Finished handshake message.
+base_key: handshake traffic secret (client or server)
+"""
+function create_finished_message(base_key::Vector{UInt8}, transcript_hash::Vector{UInt8})
+    buf = UInt8[]
+
+    # Handshake type: Finished (20)
+    push!(buf, 0x14)
+
+    # Derive finished key
+    finished_key = Crypto.hkdf_expand_label(base_key, "finished", UInt8[], 32)
+
+    # Compute verify_data = HMAC(finished_key, transcript_hash)
+    verify_data = Crypto.hmac_sha256(finished_key, transcript_hash)
+
+    # Length (3 bytes)
+    push!(buf, 0x00)
+    push!(buf, 0x00)
+    push!(buf, UInt8(length(verify_data)))
+
+    # Verify data
+    append!(buf, verify_data)
+
+    return buf
+end
+
+#= Server Handshake Message Processing =#
+
+"""
+    parse_handshake_message(data::Vector{UInt8}) -> (type, payload)
+
+Parse a TLS handshake message header and return the type and payload.
+"""
+function parse_handshake_message(data::Vector{UInt8})
+    @assert length(data) >= 4 "Handshake message too short"
+
+    msg_type = data[1]
+    msg_len = (UInt32(data[2]) << 16) | (UInt32(data[3]) << 8) | UInt32(data[4])
+
+    @assert length(data) >= 4 + msg_len "Incomplete handshake message"
+
+    return (type=msg_type, payload=data[5:4+msg_len])
+end
+
+"""
+    process_server_certificate(data::Vector{UInt8}) -> Vector{Vector{UInt8}}
+
+Parse server's Certificate message and return certificate chain.
+"""
+function process_server_certificate(data::Vector{UInt8})::Vector{Vector{UInt8}}
+    offset = 1
+
+    # Certificate request context length
+    context_len = data[offset]
+    offset += 1 + context_len
+
+    # Certificate list length (3 bytes)
+    list_len = (UInt32(data[offset]) << 16) |
+               (UInt32(data[offset+1]) << 8) |
+               UInt32(data[offset+2])
+    offset += 3
+
+    certs = Vector{UInt8}[]
+    end_offset = offset + list_len - 1
+
+    while offset <= end_offset
+        # Certificate length (3 bytes)
+        cert_len = (UInt32(data[offset]) << 16) |
+                   (UInt32(data[offset+1]) << 8) |
+                   UInt32(data[offset+2])
+        offset += 3
+
+        # Certificate data
+        push!(certs, data[offset:offset+cert_len-1])
+        offset += cert_len
+
+        # Extensions length (2 bytes)
+        ext_len = (UInt16(data[offset]) << 8) | UInt16(data[offset+1])
+        offset += 2 + ext_len
+    end
+
+    return certs
+end
+
+"""
+    verify_certificate_verify(cert::Vector{UInt8}, signature::Vector{UInt8},
+                              transcript_hash::Vector{UInt8}; is_server::Bool=true)
+
+Verify a CertificateVerify signature against the transcript hash.
+Returns true if signature is valid.
+"""
+function verify_certificate_verify(cert::Vector{UInt8}, signature::Vector{UInt8},
+                                   transcript_hash::Vector{UInt8}; is_server::Bool=true)
+    # Extract public key from certificate
+    pubkey = X509.extract_public_key(cert)
+
+    # Construct the content that was signed
+    context = is_server ? TLS13_CV_SERVER_CONTEXT : TLS13_CV_CLIENT_CONTEXT
+    to_verify = vcat(
+        fill(0x20, 64),
+        context,
+        [0x00],
+        transcript_hash
+    )
+
+    # Verify Ed25519 signature
+    return Ed25519.verify(to_verify, signature, pubkey)
+end
+
+"""
+    process_server_certificate_verify(data::Vector{UInt8}) -> (algorithm, signature)
+
+Parse server's CertificateVerify message.
+"""
+function process_server_certificate_verify(data::Vector{UInt8})
+    # Signature algorithm (2 bytes)
+    sig_algo = (UInt16(data[1]) << 8) | UInt16(data[2])
+
+    # Signature length (2 bytes)
+    sig_len = (UInt16(data[3]) << 8) | UInt16(data[4])
+
+    # Signature
+    signature = data[5:4+sig_len]
+
+    return (algorithm=sig_algo, signature=signature)
+end
+
+"""
+    compute_transcript_hash(hs::HandshakeState) -> Vector{UInt8}
+
+Compute SHA-256 hash of all handshake messages in transcript.
+"""
+function compute_transcript_hash(hs::HandshakeState)::Vector{UInt8}
+    # Concatenate all messages
+    transcript = UInt8[]
+    for msg in hs.messages
+        append!(transcript, msg)
+    end
+    return sha256(transcript)
+end
+
+"""
+    derive_handshake_keys!(hs::HandshakeState, shared_secret::Vector{UInt8})
+
+Derive handshake traffic keys from ECDHE shared secret and transcript.
+"""
+function derive_handshake_keys!(hs::HandshakeState, shared_secret::Vector{UInt8})
+    # Early secret (with no PSK)
+    early_secret = Crypto.hkdf_extract(zeros(UInt8, 32), zeros(UInt8, 32))
+
+    # Derive-Secret for handshake
+    derived = Crypto.hkdf_expand_label(early_secret, "derived", sha256(UInt8[]), 32)
+
+    # Handshake secret
+    handshake_secret = Crypto.hkdf_extract(shared_secret, derived)
+
+    # Get transcript hash
+    transcript_hash = compute_transcript_hash(hs)
+
+    # Client/Server handshake traffic secrets
+    client_hs_secret = Crypto.hkdf_expand_label(handshake_secret, "c hs traffic", transcript_hash, 32)
+    server_hs_secret = Crypto.hkdf_expand_label(handshake_secret, "s hs traffic", transcript_hash, 32)
+
+    # Derive keys and IVs
+    hs.handshake_keys[:client_key] = derive_packet_key(client_hs_secret)
+    hs.handshake_keys[:client_iv] = derive_packet_iv(client_hs_secret)
+    hs.handshake_keys[:client_hp] = derive_header_key(client_hs_secret)
+    hs.handshake_keys[:client_secret] = client_hs_secret
+
+    hs.handshake_keys[:server_key] = derive_packet_key(server_hs_secret)
+    hs.handshake_keys[:server_iv] = derive_packet_iv(server_hs_secret)
+    hs.handshake_keys[:server_hp] = derive_header_key(server_hs_secret)
+    hs.handshake_keys[:server_secret] = server_hs_secret
+
+    # Store for application key derivation
+    hs.handshake_keys[:handshake_secret] = handshake_secret
+end
+
+"""
+    derive_application_keys!(hs::HandshakeState)
+
+Derive application traffic keys after handshake completion.
+"""
+function derive_application_keys!(hs::HandshakeState)
+    handshake_secret = hs.handshake_keys[:handshake_secret]
+
+    # Derive-Secret for master
+    derived = Crypto.hkdf_expand_label(handshake_secret, "derived", sha256(UInt8[]), 32)
+
+    # Master secret (no PSK)
+    master_secret = Crypto.hkdf_extract(zeros(UInt8, 32), derived)
+
+    # Get full transcript hash (including Finished)
+    transcript_hash = compute_transcript_hash(hs)
+
+    # Application traffic secrets
+    client_app_secret = Crypto.hkdf_expand_label(master_secret, "c ap traffic", transcript_hash, 32)
+    server_app_secret = Crypto.hkdf_expand_label(master_secret, "s ap traffic", transcript_hash, 32)
+
+    # Derive keys
+    hs.application_keys[:client_key] = derive_packet_key(client_app_secret)
+    hs.application_keys[:client_iv] = derive_packet_iv(client_app_secret)
+    hs.application_keys[:client_hp] = derive_header_key(client_app_secret)
+    hs.application_keys[:client_secret] = client_app_secret
+
+    hs.application_keys[:server_key] = derive_packet_key(server_app_secret)
+    hs.application_keys[:server_iv] = derive_packet_iv(server_app_secret)
+    hs.application_keys[:server_hp] = derive_header_key(server_app_secret)
+    hs.application_keys[:server_secret] = server_app_secret
+
+    # Resumption master secret
+    hs.resumption_master_secret = Crypto.hkdf_expand_label(master_secret, "res master", transcript_hash, 32)
+end
+
 export HandshakeState, init_tls_context, start_client_handshake, set_client_certificate
 export process_server_hello, complete_handshake, derive_initial_keys!
+export create_certificate_message, create_certificate_verify_message, create_finished_message
+export parse_handshake_message, process_server_certificate, process_server_certificate_verify
+export verify_certificate_verify, compute_transcript_hash
+export derive_handshake_keys!, derive_application_keys!
 
 end # module Handshake

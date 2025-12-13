@@ -1,144 +1,138 @@
 module X25519
 
 # X25519 elliptic curve Diffie-Hellman implementation for QUIC/TLS 1.3
+# Reference: RFC 7748
 
 const P = BigInt(2)^255 - 19  # Field prime
 const A24 = BigInt(121665)    # (A - 2) / 4 where A = 486662
 
-# Clamp private key according to X25519 spec
+# Clamp private key according to X25519 spec (RFC 7748 section 5)
 function clamp_private_key!(key::Vector{UInt8})
-    key[1] &= 248
-    key[32] &= 127
-    key[32] |= 64
+    key[1] &= 248      # Clear bottom 3 bits
+    key[32] &= 127     # Clear top bit
+    key[32] |= 64      # Set second highest bit
     return key
 end
 
-# Convert 32 bytes to field element (little-endian)
-function bytes_to_field_element(bytes::Vector{UInt8})
+# Decode little-endian 32-byte scalar, then clamp
+function decode_u_coordinate(bytes::Vector{UInt8})
+    # Clear the high bit (bit 255) per RFC 7748
+    masked = copy(bytes)
+    masked[32] &= 0x7f  # Clear bit 255
     result = BigInt(0)
     for i in 32:-1:1
-        result = (result << 8) | bytes[i]
+        result = (result << 8) | masked[i]
+    end
+    return result
+end
+
+# Decode scalar (private key) with clamping
+function decode_scalar(bytes::Vector{UInt8})
+    clamped = copy(bytes)
+    clamp_private_key!(clamped)
+    result = BigInt(0)
+    for i in 32:-1:1
+        result = (result << 8) | clamped[i]
     end
     return result
 end
 
 # Convert field element to 32 bytes (little-endian)
-function field_element_to_bytes(n::BigInt)
+function encode_u_coordinate(n::BigInt)
     bytes = zeros(UInt8, 32)
-    temp = n % P
+    temp = mod(n, P)
+    if temp < 0
+        temp += P
+    end
     for i in 1:32
-        bytes[i] = temp & 0xff
+        bytes[i] = UInt8(temp & 0xff)
         temp >>= 8
     end
     return bytes
 end
 
-# Montgomery ladder for scalar multiplication
-function montgomery_ladder(k::BigInt, u::BigInt)
-    # Initialize
-    x1, x2, x3 = BigInt(1), u % P, BigInt(1)
-    z1, z2, z3 = BigInt(0), BigInt(1), BigInt(0)
+# X25519 function per RFC 7748 section 5
+# k is the scalar, u is the u-coordinate
+function x25519(k::BigInt, u::BigInt)
+    x_1 = u
+    x_2 = BigInt(1)
+    z_2 = BigInt(0)
+    x_3 = u
+    z_3 = BigInt(1)
 
-    swap = 0
+    swap = BigInt(0)
 
-    # Process each bit of scalar k
+    # Montgomery ladder from bit 254 to 0
     for t in 254:-1:0
-        bit = (k >> t) & 1
-        swap ⊻= bit
+        k_t = (k >> t) & 1
+        swap = swap ⊻ k_t
 
         # Conditional swap
         if swap != 0
-            x2, x3 = x3, x2
-            z2, z3 = z3, z2
+            x_2, x_3 = x_3, x_2
+            z_2, z_3 = z_3, z_2
         end
-        swap = bit
+        swap = k_t
 
         # Montgomery ladder step
-        a = (x2 + z2) % P
-        b = (x2 - z2 + P) % P
-        c = (x3 + z3) % P
-        d = (x3 - z3 + P) % P
+        A = mod(x_2 + z_2, P)
+        AA = mod(A * A, P)
+        B = mod(x_2 - z_2 + P, P)
+        BB = mod(B * B, P)
+        E = mod(AA - BB + P, P)
+        C = mod(x_3 + z_3, P)
+        D = mod(x_3 - z_3 + P, P)
+        DA = mod(D * A, P)
+        CB = mod(C * B, P)
 
-        e = (a * d) % P
-        f = (b * c) % P
-
-        x3 = ((e + f)^2) % P
-        z3 = (u * ((e - f + P)^2)) % P
-        x2 = ((a^2 * d^2) % P)
-
-        t1 = (a^2 - d^2 + P) % P
-        z2 = (t1 * ((a^2) + (A24 * t1))) % P
+        x_3 = mod((DA + CB) * (DA + CB), P)
+        z_3 = mod(x_1 * mod((DA - CB + P) * (DA - CB + P), P), P)
+        x_2 = mod(AA * BB, P)
+        z_2 = mod(E * mod(AA + A24 * E, P), P)
     end
 
-    # Final swap
+    # Final conditional swap
     if swap != 0
-        x2, x3 = x3, x2
-        z2, z3 = z3, z2
+        x_2, x_3 = x_3, x_2
+        z_2, z_3 = z_3, z_2
     end
 
-    # Compute result
-    if z2 == 0
-        return BigInt(0)
-    else
-        return (x2 * invmod(z2, P)) % P
-    end
+    # Return x_2 * z_2^(p-2) mod p
+    return mod(x_2 * powermod(z_2, P - 2, P), P)
 end
+
+# Base point for X25519 (u=9)
+const BASEPOINT = BigInt(9)
 
 # Generate X25519 key pair
 function generate_keypair()
     # Generate random 32-byte private key
     private_key = rand(UInt8, 32)
-    clamp_private_key!(private_key)
 
-    # Compute public key
-    public_key = scalar_base_mult(private_key)
+    # Compute public key: X25519(k, 9)
+    k = decode_scalar(private_key)
+    public_key_int = x25519(k, BASEPOINT)
+    public_key = encode_u_coordinate(public_key_int)
 
     return private_key, public_key
 end
 
 # Scalar multiplication with base point (9)
 function scalar_base_mult(scalar::Vector{UInt8})
-    k = bytes_to_field_element(scalar)
-    result = montgomery_ladder(k, BigInt(9))
-    return field_element_to_bytes(result)
+    k = decode_scalar(scalar)
+    result = x25519(k, BASEPOINT)
+    return encode_u_coordinate(result)
 end
 
-# Compute shared secret
+# Compute shared secret: X25519(k, u)
 function compute_shared_secret(private_key::Vector{UInt8}, public_key::Vector{UInt8})
-    # Clamp private key
-    clamped = copy(private_key)
-    clamp_private_key!(clamped)
-
-    # Convert to field elements
-    k = bytes_to_field_element(clamped)
-    u = bytes_to_field_element(public_key)
-
-    # Compute shared point
-    shared = montgomery_ladder(k, u)
-
-    # Convert back to bytes
-    return field_element_to_bytes(shared)
-end
-
-# Simplified implementation for testing - uses built-in modular arithmetic
-# For production, would use optimized field arithmetic
-function x25519_simple(private_key::Vector{UInt8}, public_key::Vector{UInt8})
-    # This is a simplified placeholder
-    # Real implementation needs proper Montgomery curve arithmetic
-
-    # Clamp private key
-    clamped = copy(private_key)
-    clamp_private_key!(clamped)
-
-    # For now, just XOR as placeholder (NOT SECURE - for testing only)
-    shared = zeros(UInt8, 32)
-    for i in 1:32
-        shared[i] = clamped[i] ⊻ public_key[i]
-    end
-
-    return shared
+    k = decode_scalar(private_key)
+    u = decode_u_coordinate(public_key)
+    shared = x25519(k, u)
+    return encode_u_coordinate(shared)
 end
 
 export generate_keypair, scalar_base_mult, compute_shared_secret, clamp_private_key!
+export decode_scalar, decode_u_coordinate, encode_u_coordinate
 
 end # module X25519
