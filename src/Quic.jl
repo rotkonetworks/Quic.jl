@@ -33,6 +33,9 @@ include("transport.jl")
 # JAM networking protocol (JAMNP-S)
 include("jamnps.jl")
 
+# JAMNP-S connection management
+include("jamnps_connection.jl")
+
 # FFI bindings to quiche (optional, for comparison/production use)
 include("quiche_ffi.jl")
 

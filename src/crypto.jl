@@ -61,14 +61,19 @@ mutable struct CryptoContext
     handshake_secrets::Dict{Symbol, Vector{UInt8}}
     application_secrets::Dict{Symbol, Vector{UInt8}}
 
-    CryptoContext() = new(false, AES128GCM(), Dict(), Dict(), Dict())
+    # Default to ChaCha20-Poly1305 (well-supported, preferred by Rust QUIC)
+    CryptoContext() = new(false, ChaCha20Poly1305(), Dict(), Dict(), Dict())
 end
 
 # QUIC v1 initial salt
 const INITIAL_SALT = hex2bytes("38762cf7f55934b34d179ae6a4c80cadccbb7f0a")
 
 # derive initial secrets from client's initial destination connection ID
+# Note: QUIC Initial packets ALWAYS use AES-128-GCM regardless of negotiated cipher
 function derive_initial_secrets!(ctx::CryptoContext, client_dcid::Vector{UInt8})
+    # Initial packets use AES-128-GCM
+    initial_suite = AES128GCM()
+
     # extract initial secret
     initial_secret = hkdf_extract(client_dcid, INITIAL_SALT)
 
@@ -76,17 +81,17 @@ function derive_initial_secrets!(ctx::CryptoContext, client_dcid::Vector{UInt8})
     client_secret = hkdf_expand_label(initial_secret, "client in", UInt8[], 32)
     server_secret = hkdf_expand_label(initial_secret, "server in", UInt8[], 32)
 
-    # derive keys and IVs for each direction
+    # derive keys and IVs for each direction (always 16-byte key for Initial)
     ctx.initial_secrets[:client_secret] = client_secret
     ctx.initial_secrets[:server_secret] = server_secret
 
-    ctx.initial_secrets[:client_key] = hkdf_expand_label(client_secret, "quic key", UInt8[], ctx.cipher_suite.key_len)
-    ctx.initial_secrets[:client_iv] = hkdf_expand_label(client_secret, "quic iv", UInt8[], ctx.cipher_suite.iv_len)
-    ctx.initial_secrets[:client_hp] = hkdf_expand_label(client_secret, "quic hp", UInt8[], ctx.cipher_suite.key_len)
+    ctx.initial_secrets[:client_key] = hkdf_expand_label(client_secret, "quic key", UInt8[], initial_suite.key_len)
+    ctx.initial_secrets[:client_iv] = hkdf_expand_label(client_secret, "quic iv", UInt8[], initial_suite.iv_len)
+    ctx.initial_secrets[:client_hp] = hkdf_expand_label(client_secret, "quic hp", UInt8[], initial_suite.key_len)
 
-    ctx.initial_secrets[:server_key] = hkdf_expand_label(server_secret, "quic key", UInt8[], ctx.cipher_suite.key_len)
-    ctx.initial_secrets[:server_iv] = hkdf_expand_label(server_secret, "quic iv", UInt8[], ctx.cipher_suite.iv_len)
-    ctx.initial_secrets[:server_hp] = hkdf_expand_label(server_secret, "quic hp", UInt8[], ctx.cipher_suite.key_len)
+    ctx.initial_secrets[:server_key] = hkdf_expand_label(server_secret, "quic key", UInt8[], initial_suite.key_len)
+    ctx.initial_secrets[:server_iv] = hkdf_expand_label(server_secret, "quic iv", UInt8[], initial_suite.iv_len)
+    ctx.initial_secrets[:server_hp] = hkdf_expand_label(server_secret, "quic hp", UInt8[], initial_suite.key_len)
 end
 
 # HKDF-Extract using SHA256
@@ -116,7 +121,7 @@ function hkdf_expand(prk::Vector{UInt8}, info::Vector{UInt8}, length::Int)
 end
 
 # HKDF-Expand-Label for QUIC/TLS 1.3
-function hkdf_expand_label(secret::Vector{UInt8}, label::String, context::Vector{UInt8}, length::Int)
+function hkdf_expand_label(secret::Vector{UInt8}, label::String, context::Vector{UInt8}, out_length::Int)
     # build info for HKDF-Expand
     # struct {
     #     uint16 length = length;
@@ -128,18 +133,18 @@ function hkdf_expand_label(secret::Vector{UInt8}, label::String, context::Vector
 
     info = UInt8[]
     # length (2 bytes, big-endian)
-    push!(info, UInt8((length >> 8) & 0xff))
-    push!(info, UInt8(length & 0xff))
+    push!(info, UInt8((out_length >> 8) & 0xff))
+    push!(info, UInt8(out_length & 0xff))
 
     # label length and label
-    push!(info, UInt8(length(full_label)))
+    push!(info, UInt8(Base.length(full_label)))
     append!(info, full_label)
 
     # context length and context
-    push!(info, UInt8(length(context)))
+    push!(info, UInt8(Base.length(context)))
     append!(info, context)
 
-    return hkdf_expand(secret, info, length)
+    return hkdf_expand(secret, info, out_length)
 end
 
 # encrypt payload based on cipher suite
@@ -188,7 +193,7 @@ function encrypt_chacha20_poly1305(payload::Vector{UInt8}, key::Vector{UInt8}, i
     return [ciphertext; tag]
 end
 
-# encrypt payload with AES-GCM
+# encrypt payload with AES-GCM using MbedTLS GCM API
 function encrypt_aes_gcm(payload::Vector{UInt8}, key::Vector{UInt8}, iv::Vector{UInt8},
                         packet_number::UInt64, associated_data::Vector{UInt8}, suite::CipherSuite)
     # construct nonce by XORing IV with packet number
@@ -200,26 +205,11 @@ function encrypt_aes_gcm(payload::Vector{UInt8}, key::Vector{UInt8}, iv::Vector{
         nonce[end - i + 1] ⊻= pn_bytes[end - i + 1]
     end
 
-    # select cipher based on key length
-    cipher_type = suite isa AES256GCM ? MbedTLS.CIPHER_AES_256_GCM : MbedTLS.CIPHER_AES_128_GCM
+    # Use GCM context
+    gcm = MbedTLS.GCM(MbedTLS.CIPHER_AES, key)
 
-    # encrypt with AES-GCM
-    cipher = MbedTLS.Cipher(cipher_type)
-    MbedTLS.set_key!(cipher, key, MbedTLS.ENCRYPT)
-
-    # set IV/nonce
-    MbedTLS.set_iv!(cipher, nonce)
-
-    # set associated data (packet header)
-    MbedTLS.update_ad!(cipher, associated_data)
-
-    # encrypt payload
-    ciphertext = Vector{UInt8}(undef, length(payload))
-    MbedTLS.update!(cipher, payload, ciphertext)
-
-    # get authentication tag
-    tag = Vector{UInt8}(undef, 16)
-    MbedTLS.finish!(cipher, tag)
+    # Encrypt with GCM
+    ciphertext, tag = MbedTLS.encrypt(gcm, nonce, associated_data, payload)
 
     # append tag to ciphertext
     return [ciphertext; tag]
@@ -282,7 +272,7 @@ function decrypt_chacha20_poly1305(ciphertext_with_tag::Vector{UInt8}, key::Vect
     return plaintext
 end
 
-# decrypt payload with AES-GCM
+# decrypt payload with AES-GCM using MbedTLS GCM API
 function decrypt_aes_gcm(ciphertext_with_tag::Vector{UInt8}, key::Vector{UInt8}, iv::Vector{UInt8},
                         packet_number::UInt64, associated_data::Vector{UInt8}, suite::CipherSuite)
     if length(ciphertext_with_tag) < 16
@@ -301,25 +291,11 @@ function decrypt_aes_gcm(ciphertext_with_tag::Vector{UInt8}, key::Vector{UInt8},
         nonce[end - i + 1] ⊻= pn_bytes[end - i + 1]
     end
 
-    # select cipher based on suite
-    cipher_type = suite isa AES256GCM ? MbedTLS.CIPHER_AES_256_GCM : MbedTLS.CIPHER_AES_128_GCM
+    # Use GCM context
+    gcm = MbedTLS.GCM(MbedTLS.CIPHER_AES, key)
 
-    # decrypt with AES-GCM
-    cipher = MbedTLS.Cipher(cipher_type)
-    MbedTLS.set_key!(cipher, key, MbedTLS.DECRYPT)
-    MbedTLS.set_iv!(cipher, nonce)
-    MbedTLS.update_ad!(cipher, associated_data)
-
-    plaintext = Vector{UInt8}(undef, length(ciphertext))
-    MbedTLS.update!(cipher, ciphertext, plaintext)
-
-    # verify tag
-    computed_tag = Vector{UInt8}(undef, 16)
-    MbedTLS.finish!(cipher, computed_tag)
-
-    if tag != computed_tag
-        error("Authentication tag verification failed")
-    end
+    # Decrypt with GCM - this will verify the tag
+    plaintext = MbedTLS.decrypt(gcm, nonce, associated_data, ciphertext, tag)
 
     return plaintext
 end
@@ -409,5 +385,6 @@ export CryptoContext, AES128GCM, AES256GCM, ChaCha20Poly1305
 export derive_initial_secrets!, encrypt_payload, decrypt_payload
 export protect_header!, unprotect_header!
 export hkdf_extract, hkdf_expand, hkdf_expand_label
+export hmac_sha256
 
 end # module Crypto
