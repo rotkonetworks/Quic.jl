@@ -1,12 +1,10 @@
 name = "Quic"
 uuid = "e87bf339-ccdf-4a5f-9274-4a3c1e6e3c8f"
 version = "0.1.0"
-authors = ["Alice"]
+authors = ["Rotko Networks <info@rotko.net>"]
 
 [deps]
-BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 CRC32c = "8bf52ea8-c179-5cab-976a-9e18b702a9bc"
-ChaChaCiphers = "f23b13a2-9352-431b-a28a-b2f20c485fa1"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 MbedTLS = "739be429-bea8-5141-9913-cc70e7f3736d"
@@ -16,11 +14,14 @@ Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 Sodium = "4f5b5e99-b0ad-42cd-b47a-334e172ec8bd"
 
 [compat]
-BenchmarkTools = "1.6.3"
-ChaChaCiphers = "0.3.0"
+MbedTLS = "1"
+SHA = "0.7"
+Sodium = "1"
+julia = "1.9"
 
 [extras]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Test", "BenchmarkTools"]
