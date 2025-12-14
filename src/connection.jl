@@ -17,6 +17,10 @@ using ..LossDetection: LossDetectionContext
 using ..PacketPacing
 using ..ConnectionIdManager
 using ..HTTP3
+using ..GFWMitigation
+using ..GFWMitigation: GFWMitigationConfig
+using ..MLS
+using ..MLS: QuicMLSConnection, QuicMLSConfig
 using Sockets
 
 mutable struct Connection
@@ -77,10 +81,33 @@ mutable struct Connection
     zero_rtt_enabled::Bool
     early_data_accepted::Bool
     max_early_data::UInt32
+
+    # GFW censorship mitigation
+    gfw_config::GFWMitigationConfig
+
+    # MLS (QUIC-MLS) support
+    use_mls::Bool
+    mls_conn::Union{QuicMLSConnection, Nothing}
 end
 
-function Connection(socket::UDPSocket, is_client::Bool)
+function Connection(socket::UDPSocket, is_client::Bool;
+                    gfw_config::GFWMitigationConfig = GFWMitigation.default_config(),
+                    use_mls::Bool = false,
+                    mls_identity::Vector{UInt8} = UInt8[])
     remote_cid = ConnectionId()
+
+    # Initialize MLS if enabled
+    mls_conn = if use_mls && !isempty(mls_identity)
+        config = QuicMLSConfig(mls_identity)
+        if is_client
+            MLS.init_quic_mls_client(config)
+        else
+            MLS.init_quic_mls_server(config)
+        end
+    else
+        nothing
+    end
+
     Connection(
         ConnectionId(), remote_cid, remote_cid, UInt8[],
         socket, nothing, is_client,
@@ -99,7 +126,10 @@ function Connection(socket::UDPSocket, is_client::Bool)
         nothing,  # HTTP/3 connection (initialized on demand)
         false,    # zero_rtt_enabled
         false,    # early_data_accepted
-        0         # max_early_data
+        0,        # max_early_data
+        gfw_config,  # GFW mitigation config
+        use_mls,  # MLS mode flag
+        mls_conn  # MLS connection state
     )
 end
 
@@ -250,7 +280,7 @@ function encode_varint_bytes(v::VarInt)
     return buf
 end
 
-# initiate QUIC handshake
+# initiate QUIC handshake with GFW mitigation support
 function initiate_handshake(conn::Connection, server_name::Union{String, Nothing}=nothing)
     # derive initial keys using proper crypto context
     derive_initial_secrets!(conn.crypto, conn.remote_cid.data)
@@ -258,12 +288,36 @@ function initiate_handshake(conn::Connection, server_name::Union{String, Nothing
     if conn.is_client
         # start client handshake with server name for SNI
         crypto_frame = start_client_handshake(conn.handshake, conn.remote_cid, conn.local_cid, server_name)
-        send_frame(conn, crypto_frame)
+
+        # Apply SNI fragmentation if enabled
+        if GFWMitigation.should_fragment_sni(conn.gfw_config)
+            # Fragment the ClientHello to split SNI across frames
+            fragments = GFWMitigation.fragment_around_sni(crypto_frame.data, conn.gfw_config)
+
+            if length(fragments) > 1
+                # Send multiple CRYPTO frames with fragmented data
+                for (offset, data) in fragments
+                    fragment_frame = CryptoFrame(offset, data)
+                    send_frame(conn, fragment_frame)
+                end
+            else
+                # No fragmentation needed, send as-is
+                send_frame(conn, crypto_frame)
+            end
+        else
+            send_frame(conn, crypto_frame)
+        end
     end
 end
 
 # process received handshake data
 function process_handshake_data(conn::Connection, data::Vector{UInt8})
+    # Check if using MLS mode
+    if conn.use_mls && conn.mls_conn !== nothing
+        process_mls_crypto_data(conn, data)
+        return
+    end
+
     if conn.handshake.state == :handshake && !conn.is_client
         # server processing client hello
         # (simplified - real implementation needs full TLS processing)
@@ -281,6 +335,137 @@ function process_handshake_data(conn::Connection, data::Vector{UInt8})
             conn.connected = true
         end
     end
+end
+
+#=
+================================================================================
+MLS (QUIC-MLS) HANDSHAKE SUPPORT
+================================================================================
+=#
+
+"""
+Initiate MLS handshake (for QUIC-MLS mode)
+
+Client sends KeyPackage, server waits for it.
+"""
+function initiate_mls_handshake(conn::Connection)
+    if !conn.use_mls || conn.mls_conn === nothing
+        error("MLS mode not enabled")
+    end
+
+    # Derive initial keys (still needed for Initial packets)
+    derive_initial_secrets!(conn.crypto, conn.remote_cid.data)
+
+    if conn.is_client
+        # Get KeyPackage to send
+        crypto_data = MLS.get_crypto_data_to_send(conn.mls_conn)
+
+        if !isempty(crypto_data)
+            # Send in CRYPTO frame
+            crypto_frame = CryptoFrame(UInt64(0), crypto_data)
+            send_frame(conn, crypto_frame)
+        end
+    end
+    # Server just waits for client's KeyPackage
+end
+
+"""
+Process MLS CRYPTO frame data
+"""
+function process_mls_crypto_data(conn::Connection, data::Vector{UInt8})
+    if !conn.use_mls || conn.mls_conn === nothing
+        return
+    end
+
+    # Process the MLS message
+    success = MLS.process_crypto_data(conn.mls_conn, data)
+
+    if !success
+        println("❌ MLS handshake error: $(conn.mls_conn.error_message)")
+        conn.error_code = UInt64(0x0100)  # CRYPTO_ERROR
+        return
+    end
+
+    # Check if we have a response to send
+    response = MLS.get_crypto_data_to_send(conn.mls_conn)
+    if !isempty(response)
+        crypto_frame = CryptoFrame(UInt64(0), response)
+        send_frame(conn, crypto_frame)
+    end
+
+    # Check if handshake is complete
+    if MLS.is_handshake_complete(conn.mls_conn)
+        complete_mls_handshake!(conn)
+    end
+end
+
+"""
+Complete MLS handshake and derive QUIC keys
+"""
+function complete_mls_handshake!(conn::Connection)
+    if !conn.use_mls || conn.mls_conn === nothing
+        return
+    end
+
+    # Get derived keys
+    keys = MLS.get_quic_keys(conn.mls_conn)
+
+    # Install keys into crypto context
+    # Client keys
+    conn.crypto.handshake_secrets[:client_key] = keys.client_key
+    conn.crypto.handshake_secrets[:client_iv] = keys.client_iv
+    conn.crypto.handshake_secrets[:client_hp] = keys.client_hp
+
+    # Server keys
+    conn.crypto.handshake_secrets[:server_key] = keys.server_key
+    conn.crypto.handshake_secrets[:server_iv] = keys.server_iv
+    conn.crypto.handshake_secrets[:server_hp] = keys.server_hp
+
+    # Also set as application keys (1-RTT)
+    conn.crypto.application_secrets[:client_key] = keys.client_key
+    conn.crypto.application_secrets[:client_iv] = keys.client_iv
+    conn.crypto.application_secrets[:client_hp] = keys.client_hp
+    conn.crypto.application_secrets[:server_key] = keys.server_key
+    conn.crypto.application_secrets[:server_iv] = keys.server_iv
+    conn.crypto.application_secrets[:server_hp] = keys.server_hp
+
+    # Mark handshake as complete
+    complete_handshake(conn.handshake)
+    conn.connected = true
+
+    epoch = MLS.get_epoch(conn.mls_conn)
+    println("🔐 MLS handshake complete (epoch $epoch)")
+end
+
+"""
+Check if MLS handshake is complete
+"""
+function is_mls_handshake_complete(conn::Connection)
+    if !conn.use_mls || conn.mls_conn === nothing
+        return false
+    end
+    return MLS.is_handshake_complete(conn.mls_conn)
+end
+
+"""
+Get current MLS epoch
+"""
+function get_mls_epoch(conn::Connection)
+    if !conn.use_mls || conn.mls_conn === nothing
+        return UInt64(0)
+    end
+    return MLS.get_epoch(conn.mls_conn)
+end
+
+"""
+Export a secret from MLS for application use
+"""
+function mls_export_secret(conn::Connection, label::String,
+                          context::Vector{UInt8}, length::Int)
+    if !conn.use_mls || conn.mls_conn === nothing
+        error("MLS mode not enabled")
+    end
+    return MLS.export_secret(conn.mls_conn, label, context, length)
 end
 
 # queue frame for coalescing
@@ -710,5 +895,9 @@ export rotate_connection_id!, process_new_connection_id!, process_retire_connect
 export maintain_connection_ids!
 export get_pacing_statistics, set_pacing_enabled!, update_pacing_parameters!
 export enable_http3!, send_http_request!, send_http_response!, process_http3_data!
+
+# MLS exports
+export initiate_mls_handshake, process_mls_crypto_data, complete_mls_handshake!
+export is_mls_handshake_complete, get_mls_epoch, mls_export_secret
 
 end # module ConnectionModule

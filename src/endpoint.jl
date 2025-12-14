@@ -3,14 +3,37 @@ module EndpointModule
 using ..Protocol
 using ..Packet
 using ..ConnectionModule
+using ..GFWMitigation
 using Sockets
 
 mutable struct EndpointConfig
     server_name::Union{String, Nothing}
     alpn_protocols::Vector{String}
     max_idle_timeout_ms::UInt64
-    
-    EndpointConfig() = new(nothing, String[], 30000)
+
+    # GFW censorship mitigation
+    gfw_mitigation::GFWMitigationConfig
+
+    function EndpointConfig(;
+        server_name::Union{String, Nothing} = nothing,
+        alpn_protocols::Vector{String} = String[],
+        max_idle_timeout_ms::UInt64 = UInt64(30000),
+        gfw_mitigation::GFWMitigationConfig = GFWMitigation.default_config()
+    )
+        new(server_name, alpn_protocols, max_idle_timeout_ms, gfw_mitigation)
+    end
+end
+
+# Convenience constructor for China-optimized endpoint
+function ChinaEndpointConfig(;
+    server_name::Union{String, Nothing} = nothing,
+    alpn_protocols::Vector{String} = String[]
+)
+    EndpointConfig(
+        server_name = server_name,
+        alpn_protocols = alpn_protocols,
+        gfw_mitigation = GFWMitigation.china_config()
+    )
 end
 
 mutable struct Endpoint
@@ -26,13 +49,48 @@ mutable struct Endpoint
     end
 end
 
-# client connect
+# client connect with GFW mitigation support
 function connect(endpoint::Endpoint, addr::Sockets.InetAddr)
-    conn = Connection(endpoint.socket, true)
-    conn.remote_addr = addr
+    config = endpoint.config.gfw_mitigation
+
+    # Apply port selection strategy if enabled
+    actual_addr = addr
+    if GFWMitigation.should_select_port(config)
+        recommended_port = GFWMitigation.get_recommended_dest_port(config)
+        if addr.port != recommended_port
+            # Log recommendation but use original port
+            # (server must be configured to listen on high port)
+        end
+    end
+
+    conn = Connection(endpoint.socket, true; gfw_config=config)
+    conn.remote_addr = actual_addr
 
     # save initial DCID for retry validation
     conn.initial_dcid = conn.remote_cid
+
+    # Apply GFW mitigations before handshake
+    if config.enabled
+        # Send dummy packet to prime the flow (GFW will track this as first packet)
+        if GFWMitigation.should_send_dummy(config)
+            dummy = GFWMitigation.generate_dummy_packet(config)
+            send(endpoint.socket, actual_addr.host, actual_addr.port, dummy)
+
+            # Optional delay after dummy packet
+            if config.dummy_packet_delay_ms > 0
+                sleep(config.dummy_packet_delay_ms / 1000.0)
+            end
+        end
+
+        # Send version negotiation probe if configured
+        if GFWMitigation.should_version_negotiate(config)
+            probe = GFWMitigation.create_version_probe_packet(
+                conn.remote_cid.data,
+                conn.local_cid.data
+            )
+            send(endpoint.socket, actual_addr.host, actual_addr.port, probe)
+        end
+    end
 
     endpoint.connections[conn.local_cid] = conn
     return conn
@@ -55,6 +113,6 @@ function accept(endpoint::Endpoint)
     return conn
 end
 
-export Endpoint, EndpointConfig, connect, accept
+export Endpoint, EndpointConfig, ChinaEndpointConfig, connect, accept
 
 end # module EndpointModule
