@@ -12,6 +12,8 @@ A pure Julia implementation of the QUIC transport protocol (RFC 9000) with suppo
 - **X.509** - Certificate generation with Subject Alternative Name extension
 - **JAMNP-S** - JAM Simple Networking Protocol implementation
 - **Quiche FFI** - Optional bindings to Cloudflare's quiche library
+- **GFW Mitigation** - Censorship circumvention for restrictive networks
+- **MLS (QUIC-MLS)** - Messaging Layer Security for group key management
 
 ## Installation
 
@@ -135,7 +137,16 @@ Quic.jl/
 │   ├── jamnps.jl            # JAMNP-S protocol
 │   ├── jamnps_connection.jl # JAMNP-S connection management
 │   ├── quiche_ffi.jl        # Quiche FFI bindings
-│   └── http3.jl             # HTTP/3 support
+│   ├── http3.jl             # HTTP/3 support
+│   ├── gfw_mitigation.jl    # GFW censorship circumvention
+│   └── mls/                 # MLS (QUIC-MLS) support
+│       ├── MLS.jl           # Main MLS module
+│       ├── mls_types.jl     # Core data structures
+│       ├── mls_crypto.jl    # Cryptographic primitives
+│       ├── mls_tree.jl      # Ratchet tree implementation
+│       ├── mls_key_schedule.jl # Key derivation
+│       ├── mls_handshake.jl # Group state machine
+│       └── quic_mls.jl      # QUIC integration
 ├── test/
 │   └── runtests.jl
 ├── benchmark/
@@ -205,9 +216,11 @@ julia benchmark/jamnps_benchmark.jl
 
 - RFC 9000 - QUIC: A UDP-Based Multiplexed and Secure Transport
 - RFC 9001 - Using TLS to Secure QUIC
+- RFC 9420 - The Messaging Layer Security (MLS) Protocol
 - RFC 8446 - TLS 1.3
 - RFC 7748 - X25519 Elliptic Curve Diffie-Hellman
 - RFC 8032 - Ed25519 Digital Signatures
+- draft-tian-quic-quicmls - QUIC-MLS Integration
 
 ## JAMNP-S Protocol
 
@@ -218,6 +231,176 @@ This library implements the JAM Simple Networking Protocol for JAM validator com
 - Preferred initiator selection
 - UP (Unique Persistent) and CE (Common Ephemeral) streams
 - Block announcements, work package distribution, etc.
+
+## GFW Censorship Mitigation
+
+This library includes built-in strategies to circumvent QUIC censorship, based on research from "Exposing and Circumventing SNI-based QUIC Censorship of the Great Firewall of China" (USENIX Security 2025).
+
+### Mitigation Strategies
+
+| Strategy | Description | Effectiveness |
+|----------|-------------|---------------|
+| **Dummy Packet Prefix** | Send random UDP before QUIC Initial | High - GFW only inspects first packet in flow |
+| **SNI Fragmentation** | Split ClientHello across CRYPTO frames | High - GFW doesn't reassemble fragments |
+| **Port Selection** | Ensure source_port ≤ dest_port | High - GFW ignores these packets |
+| **Version Negotiation** | Send invalid version first | Medium - Triggers version negotiation |
+
+### Quick Start (Censored Networks)
+
+```julia
+using Quic
+
+# Use pre-configured China settings
+config = ChinaEndpointConfig(server_name="example.com")
+endpoint = Endpoint(addr, config, false)
+
+# Connect with mitigations automatically applied
+conn = connect(endpoint, server_addr)
+```
+
+### Custom Configuration
+
+```julia
+using Quic.GFWMitigation
+
+# Create custom mitigation config
+config = GFWMitigationConfig(
+    enabled = true,
+    strategies = MITIGATION_DUMMY_PREFIX | MITIGATION_SNI_FRAGMENTATION,
+    dummy_packet_size_range = (10, 64),
+    fragment_count = 3,
+    chaos_mode = true  # Chrome-style frame shuffling
+)
+
+# Apply to endpoint
+endpoint_config = EndpointConfig(
+    server_name = "example.com",
+    gfw_mitigation = config
+)
+```
+
+### Available Presets
+
+```julia
+# Disabled (default)
+config = GFWMitigation.default_config()
+
+# Optimized for China
+config = GFWMitigation.china_config()
+
+# Maximum evasion (may impact performance)
+config = GFWMitigation.aggressive_config()
+```
+
+### Server-Side Requirements
+
+For best results with port selection:
+
+```bash
+# Server should listen on high port (e.g., 65535)
+# Use iptables to redirect from standard QUIC port:
+iptables -t nat -A PREROUTING -p udp --dport 65535 -j REDIRECT --to-port 443
+```
+
+### How It Works
+
+1. **Flow Tracking Evasion**: The GFW tracks UDP flows for 60 seconds. By sending a non-QUIC packet first, subsequent QUIC packets are not inspected.
+
+2. **SNI Hiding**: The GFW extracts SNI from QUIC Initial packets. By fragmenting the ClientHello across multiple CRYPTO frames, the SNI cannot be extracted from any single frame.
+
+3. **Inspection Bypass**: The GFW only inspects packets where `source_port > dest_port`. By using source ports ≤ destination port, packets bypass inspection entirely.
+
+## MLS (QUIC-MLS)
+
+This library implements MLS (Messaging Layer Security, RFC 9420) for QUIC, following draft-tian-quic-quicmls. MLS replaces TLS 1.3 for key establishment, providing:
+
+- **Forward secrecy** through epoch-based key derivation
+- **Post-compromise security** via ratchet tree updates
+- **Group key management** for future multi-party QUIC
+
+### Quick Start (QUIC-MLS)
+
+```julia
+using Quic
+
+# Server side
+server_conn = Connection(socket, false;
+    use_mls = true,
+    mls_identity = Vector{UInt8}("server.example.com"))
+
+# Client side
+client_conn = Connection(socket, true;
+    use_mls = true,
+    mls_identity = Vector{UInt8}("client@example.com"))
+
+# Initiate MLS handshake (instead of TLS)
+initiate_mls_handshake(client_conn)
+
+# Process incoming CRYPTO frames with MLS data
+process_handshake_data(conn, crypto_data)
+
+# Check if handshake is complete
+if is_mls_handshake_complete(conn)
+    # Keys are now derived from MLS epoch secret
+    epoch = get_mls_epoch(conn)
+    println("MLS established at epoch $epoch")
+end
+```
+
+### Direct MLS API
+
+```julia
+using Quic.MLS
+
+# Create MLS configuration
+config = QuicMLSConfig(Vector{UInt8}("my-identity"))
+
+# Initialize client (generates KeyPackage automatically)
+client = init_quic_mls_client(config)
+
+# Get KeyPackage to send in CRYPTO frame
+kp_data = get_crypto_data_to_send(client)
+
+# Initialize server
+server = init_quic_mls_server(config)
+
+# Server processes KeyPackage, generates Welcome
+process_crypto_data(server, kp_data)
+welcome_data = get_crypto_data_to_send(server)
+
+# Client processes Welcome
+process_crypto_data(client, welcome_data)
+
+# Both sides now have keys
+if is_handshake_complete(client)
+    keys = get_quic_keys(client)
+    # keys.client_key, keys.client_iv, keys.client_hp
+    # keys.server_key, keys.server_iv, keys.server_hp
+end
+```
+
+### Exporting Secrets
+
+```julia
+# Export application-specific secret from MLS
+secret = mls_export_secret(conn, "my-app-label", context_data, 32)
+```
+
+### MLS vs TLS
+
+| Feature | TLS 1.3 | MLS |
+|---------|---------|-----|
+| Key Exchange | ECDHE | Ratchet Tree |
+| Forward Secrecy | Per-session | Per-epoch |
+| Post-Compromise | No | Yes |
+| Multi-party | No | Yes |
+| Message Overhead | Lower | Higher |
+
+### Supported Cipher Suites
+
+- `MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519` (default)
+- `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`
+- `MLS_128_DHKEMP256_AES128GCM_SHA256_P256`
 
 ## Contributing
 
