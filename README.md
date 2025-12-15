@@ -1,6 +1,6 @@
 # Quic.jl
 
-A production-ready pure Julia implementation of the QUIC transport protocol (RFC 9000) with TLS 1.3 handshake, JAMNP-S networking, GFW mitigation, and MLS support. Native performance matches or exceeds Cloudflare's quiche.
+A production-ready pure Julia implementation of the QUIC transport protocol (RFC 9000) with TLS 1.3 handshake, GFW mitigation, and MLS support. Native performance matches or exceeds Cloudflare's quiche.
 
 ## Features
 
@@ -10,7 +10,6 @@ A production-ready pure Julia implementation of the QUIC transport protocol (RFC
 - **Ed25519** - Keypair generation, signing, verification
 - **X25519** - ECDHE key exchange (RFC 7748)
 - **X.509** - Certificate generation with Subject Alternative Name extension
-- **JAMNP-S** - JAM Simple Networking Protocol implementation
 - **Quiche FFI** - Optional bindings to Cloudflare's quiche for interop testing
 - **GFW Mitigation** - Censorship circumvention for restrictive networks
 - **MLS (QUIC-MLS)** - Messaging Layer Security for group key management
@@ -26,7 +25,7 @@ A production-ready pure Julia implementation of the QUIC transport protocol (RFC
 - Stream multiplexing and flow control
 - Connection migration
 - 0-RTT support
-- IPv6 ready for JAM network deployment
+- Full IPv6 support
 
 ## Installation
 
@@ -60,25 +59,6 @@ send_stream(conn, stream_id, b"Hello, QUIC!")
 
 # Receive response
 data = recv_stream(conn, stream_id)
-```
-
-### JAMNP-S (JAM Networking)
-
-```julia
-using Quic.JAMNPS
-
-# Generate identity (Ed25519 keypair + X.509 certificate)
-identity = generate_identity()
-
-# Derive alt name from public key
-alt_name = derive_alt_name(identity.keypair.public_key)
-
-# Create ALPN protocol identifier
-genesis_hash = hex2bytes("0123456789abcdef...")
-alpn = make_alpn(genesis_hash)  # "jamnp-s/0/01234567"
-
-# Determine connection initiator
-initiator = preferred_initiator(my_key, peer_key)
 ```
 
 ### Cryptographic Operations
@@ -147,8 +127,6 @@ Quic.jl/
 │   ├── congestion.jl        # Congestion control (NewReno, CUBIC)
 │   ├── loss_detection.jl    # Loss detection and recovery
 │   ├── packet_pacing.jl     # Packet pacing
-│   ├── jamnps.jl            # JAMNP-S protocol
-│   ├── jamnps_connection.jl # JAMNP-S connection management
 │   ├── quiche_ffi.jl        # Quiche FFI bindings
 │   ├── http3.jl             # HTTP/3 support
 │   ├── gfw_mitigation.jl    # GFW censorship circumvention
@@ -162,9 +140,9 @@ Quic.jl/
 │       └── quic_mls.jl      # QUIC integration
 ├── test/
 │   └── runtests.jl
-├── benchmark/
-│   └── jamnps_benchmark.jl
 └── examples/
+    ├── jamnps.jl            # JAM networking protocol example
+    └── jamnps_connection.jl # JAMNP-S connection example
 ```
 
 ## Performance
@@ -179,7 +157,7 @@ Native Julia implementation performance vs Cloudflare quiche (lower is better):
 | AEAD Encrypt/Decrypt | 980 ns | 840 ns | 1.2x |
 | **Overall** | - | - | **0.7x-0.8x** |
 
-Cryptographic operations (see `benchmark/jamnps_benchmark.jl`):
+Cryptographic operations:
 
 | Operation | Time |
 |-----------|------|
@@ -201,11 +179,8 @@ using Quic.QuicheFFI
 # Get quiche version
 version = quiche_version()
 
-# Create JAMNP-S configuration
-genesis = rand(UInt8, 32)
-config = jamnps_config(genesis)
-
-# Create connection
+# Create configuration and connection
+config = quiche_config_new(QUIC_VERSION_1)
 conn = quiche_connect(host, scid, local_addr, remote_addr, config)
 ```
 
@@ -225,8 +200,10 @@ Pkg.test("Quic")
 
 Run benchmarks:
 
-```bash
-julia benchmark/jamnps_benchmark.jl
+```julia
+using Quic
+run_benchmarks()
+compare_with_quiche()
 ```
 
 ## Dependencies
@@ -245,16 +222,6 @@ julia benchmark/jamnps_benchmark.jl
 - RFC 7748 - X25519 Elliptic Curve Diffie-Hellman
 - RFC 8032 - Ed25519 Digital Signatures
 - draft-tian-quic-quicmls - QUIC-MLS Integration
-
-## JAMNP-S Protocol
-
-This library implements the JAM Simple Networking Protocol for JAM validator communication:
-
-- Alternative name derivation from Ed25519 public keys
-- ALPN protocol identifiers (`jamnp-s/V/H`)
-- Preferred initiator selection
-- UP (Unique Persistent) and CE (Common Ephemeral) streams
-- Block announcements, work package distribution, etc.
 
 ## GFW Censorship Mitigation
 
@@ -442,4 +409,4 @@ MIT License
 
 - [quinn](https://github.com/quinn-rs/quinn) - Rust QUIC implementation
 - [quiche](https://github.com/cloudflare/quiche) - Cloudflare's QUIC library
-- [JAM Graypaper](https://graypaper.com) - JAM specification
+- [ngtcp2](https://github.com/ngtcp2/ngtcp2) - C QUIC implementation

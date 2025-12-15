@@ -52,12 +52,6 @@ include("endpoint.jl")
 include("congestion.jl")
 include("transport.jl")
 
-# JAM networking protocol (JAMNP-S)
-include("jamnps.jl")
-
-# JAMNP-S connection management
-include("jamnps_connection.jl")
-
 # Performance optimizations
 include("perf.jl")
 include("packet_fast.jl")
