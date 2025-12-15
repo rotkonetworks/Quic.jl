@@ -20,6 +20,23 @@ function get_libsodium()
     return _libsodium[]
 end
 
+# Load mbedtls crypto library for AES-GCM
+const _mbedtls_crypto = Ref{Ptr{Nothing}}(C_NULL)
+function get_mbedtls_crypto()
+    if _mbedtls_crypto[] == C_NULL
+        _mbedtls_crypto[] = dlopen("libmbedcrypto")
+    end
+    return _mbedtls_crypto[]
+end
+
+# mbedtls GCM context size (large enough for any platform)
+const MBEDTLS_GCM_CONTEXT_SIZE = 512
+const MBEDTLS_CIPHER_ID_AES = 2  # From mbedtls cipher.h
+
+# AES-GCM constants
+const AES_GCM_TAG_SIZE = 16
+const AES_GCM_NONCE_SIZE = 12
+
 # Simple HMAC-SHA256 implementation
 function hmac_sha256(key::Vector{UInt8}, data::Vector{UInt8})::Vector{UInt8}
     block_size = 64  # SHA-256 block size
@@ -212,9 +229,11 @@ function encrypt_chacha20_poly1305(payload::Vector{UInt8}, key::Vector{UInt8}, i
     return ciphertext
 end
 
-# encrypt payload with AES-GCM using MbedTLS GCM API
+# encrypt payload with AES-GCM using mbedtls FFI
 function encrypt_aes_gcm(payload::Vector{UInt8}, key::Vector{UInt8}, iv::Vector{UInt8},
                         packet_number::UInt64, associated_data::Vector{UInt8}, suite::CipherSuite)
+    lib = get_mbedtls_crypto()
+
     # construct nonce by XORing IV with packet number
     nonce = copy(iv)
     pn_bytes = reinterpret(UInt8, [hton(packet_number)])
@@ -224,13 +243,46 @@ function encrypt_aes_gcm(payload::Vector{UInt8}, key::Vector{UInt8}, iv::Vector{
         nonce[end - i + 1] ⊻= pn_bytes[end - i + 1]
     end
 
-    # Use GCM context
-    gcm = MbedTLS.GCM(MbedTLS.CIPHER_AES, key)
+    # Allocate GCM context
+    gcm_ctx = Vector{UInt8}(undef, MBEDTLS_GCM_CONTEXT_SIZE)
 
-    # Encrypt with GCM
-    ciphertext, tag = MbedTLS.encrypt(gcm, nonce, associated_data, payload)
+    # Initialize GCM context
+    ccall(dlsym(lib, :mbedtls_gcm_init), Cvoid, (Ptr{UInt8},), gcm_ctx)
 
-    # append tag to ciphertext
+    # Set key (keybits = key length * 8)
+    keybits = length(key) * 8
+    ret = ccall(dlsym(lib, :mbedtls_gcm_setkey), Cint,
+                (Ptr{UInt8}, Cint, Ptr{UInt8}, Cuint),
+                gcm_ctx, MBEDTLS_CIPHER_ID_AES, key, keybits)
+    if ret != 0
+        ccall(dlsym(lib, :mbedtls_gcm_free), Cvoid, (Ptr{UInt8},), gcm_ctx)
+        error("Failed to set AES-GCM key: $ret")
+    end
+
+    # Allocate output buffers
+    ciphertext = Vector{UInt8}(undef, length(payload))
+    tag = Vector{UInt8}(undef, AES_GCM_TAG_SIZE)
+
+    # Encrypt and generate tag
+    # mbedtls_gcm_crypt_and_tag(ctx, mode, length, iv, iv_len, add, add_len, input, output, tag_len, tag)
+    ret = ccall(dlsym(lib, :mbedtls_gcm_crypt_and_tag), Cint,
+                (Ptr{UInt8}, Cint, Csize_t, Ptr{UInt8}, Csize_t,
+                 Ptr{UInt8}, Csize_t, Ptr{UInt8}, Ptr{UInt8}, Csize_t, Ptr{UInt8}),
+                gcm_ctx, 1,  # 1 = MBEDTLS_GCM_ENCRYPT
+                length(payload),  # length of input/output
+                nonce, length(nonce),
+                associated_data, length(associated_data),
+                payload, ciphertext,
+                AES_GCM_TAG_SIZE, tag)
+
+    # Free context
+    ccall(dlsym(lib, :mbedtls_gcm_free), Cvoid, (Ptr{UInt8},), gcm_ctx)
+
+    if ret != 0
+        error("AES-GCM encryption failed: $ret")
+    end
+
+    # Return ciphertext with tag appended
     return [ciphertext; tag]
 end
 
@@ -289,16 +341,18 @@ function decrypt_chacha20_poly1305(ciphertext_with_tag::Vector{UInt8}, key::Vect
     return plaintext
 end
 
-# decrypt payload with AES-GCM using MbedTLS GCM API
+# decrypt payload with AES-GCM using mbedtls FFI
 function decrypt_aes_gcm(ciphertext_with_tag::Vector{UInt8}, key::Vector{UInt8}, iv::Vector{UInt8},
                         packet_number::UInt64, associated_data::Vector{UInt8}, suite::CipherSuite)
-    if length(ciphertext_with_tag) < 16
+    lib = get_mbedtls_crypto()
+
+    if length(ciphertext_with_tag) < AES_GCM_TAG_SIZE
         error("Ciphertext too short for authentication tag")
     end
 
     # separate ciphertext and tag
-    ciphertext = ciphertext_with_tag[1:end-16]
-    tag = ciphertext_with_tag[end-15:end]
+    ciphertext = ciphertext_with_tag[1:end-AES_GCM_TAG_SIZE]
+    tag = ciphertext_with_tag[end-AES_GCM_TAG_SIZE+1:end]
 
     # construct nonce
     nonce = copy(iv)
@@ -308,11 +362,40 @@ function decrypt_aes_gcm(ciphertext_with_tag::Vector{UInt8}, key::Vector{UInt8},
         nonce[end - i + 1] ⊻= pn_bytes[end - i + 1]
     end
 
-    # Use GCM context
-    gcm = MbedTLS.GCM(MbedTLS.CIPHER_AES, key)
+    # Allocate GCM context
+    gcm_ctx = Vector{UInt8}(undef, MBEDTLS_GCM_CONTEXT_SIZE)
 
-    # Decrypt with GCM - this will verify the tag
-    plaintext = MbedTLS.decrypt(gcm, nonce, associated_data, ciphertext, tag)
+    # Initialize GCM context
+    ccall(dlsym(lib, :mbedtls_gcm_init), Cvoid, (Ptr{UInt8},), gcm_ctx)
+
+    # Set key
+    keybits = length(key) * 8
+    ret = ccall(dlsym(lib, :mbedtls_gcm_setkey), Cint,
+                (Ptr{UInt8}, Cint, Ptr{UInt8}, Cuint),
+                gcm_ctx, MBEDTLS_CIPHER_ID_AES, key, keybits)
+    if ret != 0
+        ccall(dlsym(lib, :mbedtls_gcm_free), Cvoid, (Ptr{UInt8},), gcm_ctx)
+        error("Failed to set AES-GCM key: $ret")
+    end
+
+    # Allocate output buffer
+    plaintext = Vector{UInt8}(undef, length(ciphertext))
+
+    # Decrypt and verify tag
+    ret = ccall(dlsym(lib, :mbedtls_gcm_auth_decrypt), Cint,
+                (Ptr{UInt8}, Csize_t, Ptr{UInt8}, Csize_t,
+                 Ptr{UInt8}, Csize_t, Ptr{UInt8}, Csize_t,
+                 Ptr{UInt8}, Ptr{UInt8}),
+                gcm_ctx, length(ciphertext), nonce, length(nonce),
+                associated_data, length(associated_data), tag, AES_GCM_TAG_SIZE,
+                ciphertext, plaintext)
+
+    # Free context
+    ccall(dlsym(lib, :mbedtls_gcm_free), Cvoid, (Ptr{UInt8},), gcm_ctx)
+
+    if ret != 0
+        error("AES-GCM decryption/authentication failed: $ret")
+    end
 
     return plaintext
 end

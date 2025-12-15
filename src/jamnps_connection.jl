@@ -427,19 +427,54 @@ function process_long_header_packet!(conn::JAMNPSConn, data::Vector{UInt8})
 end
 
 function process_initial_payload!(conn::JAMNPSConn, data::Vector{UInt8}, payload_len::UInt64)
+    if length(data) < 20  # Minimum: 1 byte PN + 16 byte tag + some payload
+        return
+    end
+
     # Get decryption keys
     key = conn.is_initiator ? conn.initial_secrets[:server_key] : conn.initial_secrets[:client_key]
     iv = conn.is_initiator ? conn.initial_secrets[:server_iv] : conn.initial_secrets[:client_iv]
+    hp_key = conn.is_initiator ? conn.initial_secrets[:server_hp] : conn.initial_secrets[:client_hp]
 
-    # Packet number (first 1-4 bytes of payload, assume 2 for now)
-    pn_len = 2
-    pn = (UInt64(data[1]) << 8) | UInt64(data[2])
+    # Sample for header protection (16 bytes starting at PN + 4)
+    sample_offset = min(5, length(data) - 15)
+    sample = data[sample_offset:sample_offset+15]
 
-    # Decrypt payload
-    # TODO: Implement proper AEAD decryption
+    # Remove header protection to get packet number length
+    mask = Crypto.aes_header_protection_mask(hp_key, sample, Crypto.AES128GCM())
 
-    # For now, process as plaintext frames
-    process_frames!(conn, data[pn_len+1:end])
+    # First byte was already parsed, we need the protected PN bytes
+    # PN length is encoded in first byte bits 0-1 (after unprotecting)
+    pn_len = 2  # Default, could be 1-4 based on first byte
+
+    # Unprotect packet number
+    pn = UInt64(0)
+    for i in 1:pn_len
+        pn = (pn << 8) | UInt64(data[i] ⊻ mask[1 + i])
+    end
+
+    # Construct nonce: IV XOR packet number (right-aligned)
+    nonce = copy(iv)
+    pn_bytes = reinterpret(UInt8, [hton(pn)])
+    for i in 1:min(8, length(nonce))
+        nonce[end - i + 1] ⊻= pn_bytes[end - i + 1]
+    end
+
+    # Ciphertext is after packet number, includes 16-byte auth tag
+    ciphertext_with_tag = data[pn_len+1:end]
+
+    # AAD is the unprotected header (for Initial packets, this is complex)
+    # For simplicity, use empty AAD like some implementations
+    aad = UInt8[]
+
+    # Decrypt with AES-128-GCM
+    try
+        plaintext = Crypto.decrypt_aes_gcm(ciphertext_with_tag, key, iv, pn, aad, Crypto.AES128GCM())
+        process_frames!(conn, plaintext)
+    catch e
+        # Decryption failed - packet may be malformed or wrong keys
+        @debug "AEAD decryption failed" exception=e
+    end
 end
 
 function process_handshake_payload!(conn::JAMNPSConn, data::Vector{UInt8})
@@ -605,23 +640,68 @@ end
 function process_certificate_verify!(conn::JAMNPSConn, data::Vector{UInt8})
     push!(conn.handshake.messages, data)
 
-    # Verify server's CertificateVerify signature
-    cv = Handshake.process_server_certificate_verify(data[5:end])
+    # Parse server's CertificateVerify
+    sig_algo, signature = Handshake.process_server_certificate_verify(data[5:end])
 
-    # Get transcript hash (up to but not including CertificateVerify)
+    # Get transcript hash (all messages up to but not including CertificateVerify)
+    # Remove CertificateVerify from messages temporarily for transcript
+    cv_msg = pop!(conn.handshake.messages)
     transcript_hash = Handshake.compute_transcript_hash(conn.handshake)
+    push!(conn.handshake.messages, cv_msg)
 
-    # TODO: Actually verify the signature
+    # Verify signature using peer's certificate
+    if conn.peer_pubkey !== nothing
+        # Construct signed content per TLS 1.3 spec
+        context = b"TLS 1.3, server CertificateVerify"
+        signed_content = vcat(
+            fill(0x20, 64),  # 64 spaces
+            context,
+            [0x00],         # separator
+            transcript_hash
+        )
+
+        valid = Ed25519.verify(signature, signed_content, conn.peer_pubkey)
+        if !valid
+            error("JAMNP-S: CertificateVerify signature verification failed")
+        end
+    end
 
     conn.handshake.state = :wait_fin
-    println("JAMNP-S: Processed server CertificateVerify")
+    println("JAMNP-S: Verified server CertificateVerify")
 end
 
 function process_finished!(conn::JAMNPSConn, data::Vector{UInt8})
     push!(conn.handshake.messages, data)
 
-    # Verify server's Finished message
-    # TODO: Verify HMAC
+    # Extract verify_data from Finished message (after handshake header)
+    # Format: HandshakeType(1) + Length(3) + verify_data(32)
+    received_verify_data = data[5:end]
+
+    # Compute expected verify_data
+    # Remove Finished from transcript temporarily
+    fin_msg = pop!(conn.handshake.messages)
+    transcript_hash = Handshake.compute_transcript_hash(conn.handshake)
+    push!(conn.handshake.messages, fin_msg)
+
+    # Derive finished_key from server's handshake traffic secret
+    server_secret = conn.handshake_secrets[:server_secret]
+    finished_key = Crypto.hkdf_expand_label(server_secret, "finished", UInt8[], 32)
+
+    # Compute verify_data = HMAC-SHA256(finished_key, transcript_hash)
+    expected_verify_data = Crypto.hmac_sha256(finished_key, transcript_hash)
+
+    # Constant-time comparison
+    if length(received_verify_data) != length(expected_verify_data)
+        error("JAMNP-S: Finished message length mismatch")
+    end
+
+    diff = UInt8(0)
+    for i in 1:length(expected_verify_data)
+        diff |= received_verify_data[i] ⊻ expected_verify_data[i]
+    end
+    if diff != 0
+        error("JAMNP-S: Finished message verification failed")
+    end
 
     # Derive application secrets
     derive_application_secrets!(conn)
@@ -686,8 +766,168 @@ function send_client_auth!(conn::JAMNPSConn)
 end
 
 function send_server_handshake!(conn::JAMNPSConn)
-    # TODO: Implement full server handshake
-    println("JAMNP-S: Server handshake not yet implemented")
+    # Generate X25519 key pair for key exchange
+    server_priv, server_pub = X25519.generate_keypair()
+
+    # Compute shared secret (server_priv * client_pub from ClientHello)
+    # The client's public key was extracted when processing ClientHello
+    if conn.handshake.peer_x25519_pub !== nothing
+        conn.shared_secret = X25519.diffie_hellman(server_priv, conn.handshake.peer_x25519_pub)
+    else
+        error("JAMNP-S: Client X25519 public key not found")
+    end
+
+    # 1. ServerHello
+    server_hello = create_server_hello(conn, server_pub)
+    push!(conn.handshake.messages, server_hello)
+
+    # Derive handshake secrets after ServerHello
+    derive_handshake_secrets!(conn)
+
+    # 2. EncryptedExtensions (empty for basic handshake)
+    encrypted_ext = create_encrypted_extensions(conn)
+    push!(conn.handshake.messages, encrypted_ext)
+
+    # 3. CertificateRequest (require client cert for mutual auth)
+    cert_request = create_certificate_request(conn)
+    push!(conn.handshake.messages, cert_request)
+
+    # 4. Certificate (server's certificate)
+    cert_msg = Handshake.create_certificate_message([conn.config.identity.certificate])
+    push!(conn.handshake.messages, cert_msg)
+
+    # 5. CertificateVerify
+    transcript_hash = Handshake.compute_transcript_hash(conn.handshake)
+    cv_msg = Handshake.create_certificate_verify_message(
+        conn.config.identity.keypair,
+        transcript_hash;
+        is_server=true
+    )
+    push!(conn.handshake.messages, cv_msg)
+
+    # 6. Finished
+    server_secret = conn.handshake_secrets[:server_secret]
+    transcript_hash = Handshake.compute_transcript_hash(conn.handshake)
+    fin_msg = Handshake.create_finished_message(server_secret, transcript_hash)
+    push!(conn.handshake.messages, fin_msg)
+
+    # Send ServerHello in Initial packet
+    send_initial_packet!(conn, Frame.CryptoFrame(0, server_hello))
+
+    # Send rest in Handshake packet (encrypted with handshake keys)
+    handshake_data = vcat(encrypted_ext, cert_request, cert_msg, cv_msg, fin_msg)
+    send_handshake_packet!(conn, Frame.CryptoFrame(0, handshake_data))
+
+    conn.handshake.state = :wait_cert
+    println("JAMNP-S: Server handshake sent")
+end
+
+function create_server_hello(conn::JAMNPSConn, server_pub::Vector{UInt8})
+    buf = UInt8[]
+
+    # HandshakeType: ServerHello (2)
+    push!(buf, 0x02)
+
+    # Length placeholder (3 bytes)
+    len_pos = length(buf) + 1
+    append!(buf, [0x00, 0x00, 0x00])
+
+    # ProtocolVersion: TLS 1.2 (for compatibility, real version in extension)
+    append!(buf, [0x03, 0x03])
+
+    # Random (32 bytes)
+    server_random = rand(UInt8, 32)
+    append!(buf, server_random)
+
+    # Session ID echo (from ClientHello, typically 32 bytes)
+    push!(buf, 0x20)  # length
+    append!(buf, rand(UInt8, 32))
+
+    # Cipher suite: TLS_AES_128_GCM_SHA256 (0x1301)
+    append!(buf, [0x13, 0x01])
+
+    # Compression method: null (0)
+    push!(buf, 0x00)
+
+    # Extensions
+    ext_buf = UInt8[]
+
+    # supported_versions extension (TLS 1.3)
+    append!(ext_buf, [0x00, 0x2b])  # extension type
+    append!(ext_buf, [0x00, 0x02])  # length
+    append!(ext_buf, [0x03, 0x04])  # TLS 1.3
+
+    # key_share extension
+    append!(ext_buf, [0x00, 0x33])  # extension type
+    key_share_len = 2 + 2 + length(server_pub)
+    append!(ext_buf, reinterpret(UInt8, [hton(UInt16(key_share_len))]))
+    append!(ext_buf, [0x00, 0x1d])  # x25519
+    append!(ext_buf, reinterpret(UInt8, [hton(UInt16(length(server_pub)))]))
+    append!(ext_buf, server_pub)
+
+    # Extensions length
+    append!(buf, reinterpret(UInt8, [hton(UInt16(length(ext_buf)))]))
+    append!(buf, ext_buf)
+
+    # Update length
+    msg_len = length(buf) - 4
+    buf[len_pos:len_pos+2] = [(msg_len >> 16) & 0xff, (msg_len >> 8) & 0xff, msg_len & 0xff]
+
+    return buf
+end
+
+function create_encrypted_extensions(conn::JAMNPSConn)
+    buf = UInt8[]
+
+    # HandshakeType: EncryptedExtensions (8)
+    push!(buf, 0x08)
+
+    # Length placeholder
+    len_pos = length(buf) + 1
+    append!(buf, [0x00, 0x00, 0x00])
+
+    # Extensions length (2 bytes) - empty for now
+    append!(buf, [0x00, 0x00])
+
+    # Update length
+    msg_len = length(buf) - 4
+    buf[len_pos:len_pos+2] = [(msg_len >> 16) & 0xff, (msg_len >> 8) & 0xff, msg_len & 0xff]
+
+    return buf
+end
+
+function create_certificate_request(conn::JAMNPSConn)
+    buf = UInt8[]
+
+    # HandshakeType: CertificateRequest (13)
+    push!(buf, 0x0d)
+
+    # Length placeholder
+    len_pos = length(buf) + 1
+    append!(buf, [0x00, 0x00, 0x00])
+
+    # certificate_request_context (empty)
+    push!(buf, 0x00)
+
+    # Extensions
+    ext_buf = UInt8[]
+
+    # signature_algorithms extension (required)
+    append!(ext_buf, [0x00, 0x0d])  # extension type
+    # Ed25519 (0x0807)
+    append!(ext_buf, [0x00, 0x04])  # length
+    append!(ext_buf, [0x00, 0x02])  # algorithms length
+    append!(ext_buf, [0x08, 0x07])  # ed25519
+
+    # Extensions length
+    append!(buf, reinterpret(UInt8, [hton(UInt16(length(ext_buf)))]))
+    append!(buf, ext_buf)
+
+    # Update length
+    msg_len = length(buf) - 4
+    buf[len_pos:len_pos+2] = [(msg_len >> 16) & 0xff, (msg_len >> 8) & 0xff, msg_len & 0xff]
+
+    return buf
 end
 
 #= Key Derivation =#
@@ -799,16 +1039,40 @@ function send_initial_packet!(conn::JAMNPSConn, frame::Frame.CryptoFrame)
     Protocol.encode_varint!(len_buf, Protocol.VarInt(total_len))
     append!(buf, len_buf)
 
-    # Packet number (2 bytes)
+    # Packet number (2 bytes) - will be protected later
     pn = conn.next_pn
     conn.next_pn += 1
+    pn_offset = length(buf) + 1
     push!(buf, UInt8((pn >> 8) & 0xff))
     push!(buf, UInt8(pn & 0xff))
 
-    # Encrypt payload (simplified - just append for now)
-    # TODO: Implement proper AEAD encryption
-    append!(buf, payload)
-    append!(buf, zeros(UInt8, 16))  # Fake AEAD tag
+    # Get encryption keys
+    key = conn.is_initiator ? conn.initial_secrets[:client_key] : conn.initial_secrets[:server_key]
+    iv = conn.is_initiator ? conn.initial_secrets[:client_iv] : conn.initial_secrets[:server_iv]
+    hp_key = conn.is_initiator ? conn.initial_secrets[:client_hp] : conn.initial_secrets[:server_hp]
+
+    # AAD is the header up to and including packet number
+    aad = buf[1:end]
+
+    # Encrypt payload with AES-128-GCM
+    ciphertext_with_tag = Crypto.encrypt_aes_gcm(payload, key, iv, pn, aad, Crypto.AES128GCM())
+    append!(buf, ciphertext_with_tag)
+
+    # Apply header protection
+    # Sample starts 4 bytes after packet number
+    sample_offset = pn_offset + 4 - 1
+    if sample_offset + 16 <= length(buf)
+        sample = buf[sample_offset:sample_offset+15]
+        mask = Crypto.aes_header_protection_mask(hp_key, sample, Crypto.AES128GCM())
+
+        # Protect first byte (lower 4 bits for long header)
+        buf[1] ⊻= mask[1] & 0x0f
+
+        # Protect packet number bytes
+        for i in 1:2
+            buf[pn_offset + i - 1] ⊻= mask[1 + i]
+        end
+    end
 
     # Send
     if conn.remote_addr !== nothing

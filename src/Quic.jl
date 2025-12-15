@@ -58,6 +58,11 @@ include("jamnps.jl")
 # JAMNP-S connection management
 include("jamnps_connection.jl")
 
+# Performance optimizations
+include("perf.jl")
+include("packet_fast.jl")
+include("benchmark.jl")
+
 # FFI bindings to quiche (optional, for comparison/production use)
 include("quiche_ffi.jl")
 
@@ -74,5 +79,9 @@ using .MLS: QUIC_MLS_CLIENT, QUIC_MLS_SERVER
 using .MLS: init_quic_mls_client, init_quic_mls_server
 using .MLS: process_crypto_data, get_crypto_data_to_send
 using .MLS: is_handshake_complete, get_quic_keys
+
+# Performance module re-exports
+export run_benchmarks, compare_with_quiche
+using .Benchmark: run_benchmarks, compare_with_quiche
 
 end # module

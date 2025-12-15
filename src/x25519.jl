@@ -117,6 +117,21 @@ function generate_keypair()
     return private_key, public_key
 end
 
+# Generate X25519 key pair from seed (deterministic)
+function generate_keypair_from_seed(seed::Vector{UInt8})
+    @assert length(seed) >= 32 "Seed must be at least 32 bytes"
+
+    # Use first 32 bytes as private key
+    private_key = copy(seed[1:32])
+
+    # Compute public key: X25519(k, 9)
+    k = decode_scalar(private_key)
+    public_key_int = x25519(k, BASEPOINT)
+    public_key = encode_u_coordinate(public_key_int)
+
+    return private_key, public_key
+end
+
 # Scalar multiplication with base point (9)
 function scalar_base_mult(scalar::Vector{UInt8})
     k = decode_scalar(scalar)
@@ -132,7 +147,7 @@ function compute_shared_secret(private_key::Vector{UInt8}, public_key::Vector{UI
     return encode_u_coordinate(shared)
 end
 
-export generate_keypair, scalar_base_mult, compute_shared_secret, clamp_private_key!
+export generate_keypair, generate_keypair_from_seed, scalar_base_mult, compute_shared_secret, clamp_private_key!
 export decode_scalar, decode_u_coordinate, encode_u_coordinate
 
 end # module X25519

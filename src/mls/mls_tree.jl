@@ -495,7 +495,27 @@ function apply_update_path!(tree::RatchetTree, sender_leaf::LeafIndex,
         # If this node is on our path too, derive private key
         if sender_path[i] in my_path
             node_secret = MLSCrypto.derive_secret(suite, current_secret, "node")
-            # TODO: Derive private key from node secret
+
+            # Derive private key using HPKE DeriveKeyPair
+            # For X25519: expand the node_secret to get the seed, then derive key pair
+            seed = MLSCrypto.expand_with_label(suite, node_secret, "key", UInt8[], 32)
+            private_key, public_key = X25519.generate_keypair_from_seed(seed)
+
+            # Store the private key in the node
+            node_with_priv = TreeNode(
+                LeafNode(
+                    update_path.nodes[i].encryption_key,
+                    update_path.nodes[i].signature_key,
+                    update_path.nodes[i].credential,
+                    update_path.nodes[i].capabilities,
+                    update_path.nodes[i].leaf_node_source,
+                    update_path.nodes[i].extensions,
+                    update_path.nodes[i].signature
+                ),
+                nothing,
+                HPKEPrivateKey(private_key)
+            )
+            set_node!(tree, sender_path[i], node_with_priv)
         end
 
         current_secret = MLSCrypto.derive_secret(suite, current_secret, "path")
