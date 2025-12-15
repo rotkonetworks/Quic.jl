@@ -433,17 +433,27 @@ function unprotect_header!(ctx::CryptoContext, header::Vector{UInt8}, hp_key::Ve
     protect_header!(ctx, header, hp_key, sample, pn_offset, pn_len)
 end
 
-# backwards compatibility
-function protect_header!(header::Vector{UInt8}, hp_key::Vector{UInt8}, sample::Vector{UInt8})
+# backwards compatibility - accept any AbstractVector for flexibility with views
+function protect_header!(header::AbstractVector{UInt8}, hp_key::Vector{UInt8}, sample::Vector{UInt8})
     ctx = CryptoContext()
     pn_offset = 1 + 8  # assuming short header with 8-byte CID
-    protect_header!(ctx, header, hp_key, sample, pn_offset, 2)
+    # Convert to Vector if needed for the internal function
+    header_vec = header isa Vector{UInt8} ? header : collect(header)
+    protect_header!(ctx, header_vec, hp_key, sample, pn_offset, 2)
+    # Copy back if it was a view
+    if !(header isa Vector{UInt8})
+        header .= header_vec
+    end
 end
 
-function unprotect_header!(header::Vector{UInt8}, hp_key::Vector{UInt8}, sample::Vector{UInt8})
+function unprotect_header!(header::AbstractVector{UInt8}, hp_key::Vector{UInt8}, sample::Vector{UInt8})
     ctx = CryptoContext()
     pn_offset = 1 + 8
-    unprotect_header!(ctx, header, hp_key, sample, pn_offset, 2)
+    header_vec = header isa Vector{UInt8} ? header : collect(header)
+    unprotect_header!(ctx, header_vec, hp_key, sample, pn_offset, 2)
+    if !(header isa Vector{UInt8})
+        header .= header_vec
+    end
 end
 
 # AES header protection mask

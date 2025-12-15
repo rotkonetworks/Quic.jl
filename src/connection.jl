@@ -238,7 +238,10 @@ function send_frame(conn::Connection, frame::QuicFrame)
         if length(encrypted) >= 20
             sample_offset = pn_offset + 2 + 4  # skip pn and 4 bytes into payload
             sample = buf[sample_offset:sample_offset + 15]
-            protect_header!(@view(buf[1:pn_offset + 1]), hp_key, sample)
+            # Apply header protection in-place
+            header_slice = buf[1:pn_offset + 1]
+            protect_header!(header_slice, hp_key, sample)
+            buf[1:pn_offset + 1] = header_slice
         end
     else
         # no encryption (shouldn't happen in production)
