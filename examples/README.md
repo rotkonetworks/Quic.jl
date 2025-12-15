@@ -13,6 +13,7 @@
 - `mls_handshake.jl` - QUIC-MLS key exchange demo
 
 ## Interoperability
+- `interop_test.jl` - RFC 9001 test vectors and public server tests
 - `quinn_interop.jl` - Quinn (Rust) interop test
 
 ## JAMNP-S Reference
@@ -33,4 +34,7 @@ julia --project=. examples/mls_handshake.jl
 # HTTP/3
 julia --project=. examples/http3_server.jl   # Terminal 1
 julia --project=. examples/http3_client.jl   # Terminal 2
+
+# Interoperability testing (RFC 9001 test vectors)
+julia --project=. examples/interop_test.jl
 ```

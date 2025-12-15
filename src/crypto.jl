@@ -494,5 +494,8 @@ export derive_initial_secrets!, encrypt_payload, decrypt_payload
 export protect_header!, unprotect_header!
 export hkdf_extract, hkdf_expand, hkdf_expand_label
 export hmac_sha256
+export aes_header_protection_mask, chacha20_header_protection_mask
+export encrypt_aes_gcm, decrypt_aes_gcm
+export encrypt_chacha20_poly1305, decrypt_chacha20_poly1305
 
 end # module Crypto

@@ -63,9 +63,9 @@ function init_tls_context(hs::HandshakeState, server_name::Union{String, Nothing
 
     if hs.role == :client
         MbedTLS.config_defaults!(config,
-            MbedTLS.MBEDTLS_SSL_IS_CLIENT,
-            MbedTLS.MBEDTLS_SSL_TRANSPORT_DATAGRAM,
-            MbedTLS.MBEDTLS_SSL_PRESET_DEFAULT)
+            endpoint=MbedTLS.MBEDTLS_SSL_IS_CLIENT,
+            transport=MbedTLS.MBEDTLS_SSL_TRANSPORT_DATAGRAM,
+            preset=MbedTLS.MBEDTLS_SSL_PRESET_DEFAULT)
 
         # set ALPN protocols for QUIC
         MbedTLS.set_alpn!(config, ["h3", "h3-29"])
@@ -76,9 +76,9 @@ function init_tls_context(hs::HandshakeState, server_name::Union{String, Nothing
         end
     else
         MbedTLS.config_defaults!(config,
-            MbedTLS.MBEDTLS_SSL_IS_SERVER,
-            MbedTLS.MBEDTLS_SSL_TRANSPORT_DATAGRAM,
-            MbedTLS.MBEDTLS_SSL_PRESET_DEFAULT)
+            endpoint=MbedTLS.MBEDTLS_SSL_IS_SERVER,
+            transport=MbedTLS.MBEDTLS_SSL_TRANSPORT_DATAGRAM,
+            preset=MbedTLS.MBEDTLS_SSL_PRESET_DEFAULT)
     end
 
     # set TLS 1.3 only
