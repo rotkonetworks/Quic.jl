@@ -29,6 +29,8 @@ export init_quic_mls_client, init_quic_mls_server
 export process_crypto_data, get_crypto_data_to_send
 export is_handshake_complete, get_quic_keys
 export QuicMLSKeys
+export get_send_key, get_recv_key
+export get_epoch, export_secret, update_epoch!
 
 #=
 ================================================================================
