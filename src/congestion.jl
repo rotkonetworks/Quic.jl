@@ -5,6 +5,7 @@ using ..Protocol
 const MIN_CWND = 2 * 1200  # 2 * max datagram size
 const MAX_CWND = 10 * 1024 * 1024  # 10 MB
 const INITIAL_CWND = 14720  # ~10 * MSS
+const INITIAL_RTT_NS = UInt64(333_000_000)  # 333ms initial RTT estimate in nanoseconds
 
 # RTT estimation
 mutable struct RttEstimator
@@ -16,7 +17,7 @@ mutable struct RttEstimator
     RttEstimator() = new(typemax(UInt64), INITIAL_RTT_NS, INITIAL_RTT_NS ÷ 2, 0)
 end
 
-function update_rtt!(rtt::RttEstimator, sample::UInt64, ack_delay::UInt64=0)
+function update_rtt!(rtt::RttEstimator, sample::Integer, ack_delay::Integer=0)
     rtt.latest_rtt = sample
     rtt.min_rtt = min(rtt.min_rtt, sample)
 
@@ -48,36 +49,39 @@ mutable struct NewReno
     NewReno() = new(INITIAL_CWND, typemax(UInt64), 0, 0)
 end
 
-function on_packet_sent!(cc::NewReno, bytes::UInt64)
-    cc.bytes_in_flight += bytes
+function on_packet_sent!(cc::NewReno, bytes::Integer)
+    cc.bytes_in_flight += UInt64(bytes)
 end
 
-function on_packet_acked!(cc::NewReno, bytes::UInt64)
-    cc.bytes_in_flight = max(0, cc.bytes_in_flight - bytes)
+function on_packet_acked!(cc::NewReno, bytes::Integer)
+    b = UInt64(bytes)
+    cc.bytes_in_flight = cc.bytes_in_flight > b ? cc.bytes_in_flight - b : UInt64(0)
 
     if cc.cwnd < cc.ssthresh
         # slow start
-        cc.cwnd = min(cc.cwnd + bytes, MAX_CWND)
+        cc.cwnd = min(cc.cwnd + b, MAX_CWND)
     else
         # congestion avoidance
-        increment = (bytes * bytes) ÷ cc.cwnd
+        increment = (b * b) ÷ cc.cwnd
         cc.cwnd = min(cc.cwnd + increment, MAX_CWND)
     end
 end
 
-function on_packet_lost!(cc::NewReno, bytes::UInt64, now::UInt64)
-    cc.bytes_in_flight = max(0, cc.bytes_in_flight - bytes)
+function on_packet_lost!(cc::NewReno, bytes::Integer, now::Integer)
+    b = UInt64(bytes)
+    n = UInt64(now)
+    cc.bytes_in_flight = cc.bytes_in_flight > b ? cc.bytes_in_flight - b : UInt64(0)
 
     # only reduce cwnd once per recovery period
-    if now > cc.recovery_start_time + INITIAL_RTT_NS
-        cc.recovery_start_time = now
+    if n > cc.recovery_start_time + INITIAL_RTT_NS
+        cc.recovery_start_time = n
         cc.ssthresh = max(cc.cwnd ÷ 2, MIN_CWND)
         cc.cwnd = cc.ssthresh
     end
 end
 
-function can_send(cc::NewReno, bytes::UInt64)
-    return cc.bytes_in_flight + bytes <= cc.cwnd
+function can_send(cc::NewReno, bytes::Integer)
+    return cc.bytes_in_flight + UInt64(bytes) <= cc.cwnd
 end
 
 # pacing support

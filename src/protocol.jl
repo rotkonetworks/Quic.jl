@@ -72,24 +72,24 @@ end
 # decode varint from buffer
 function decode_varint(buf::AbstractVector{UInt8}, pos::Int=1)
     isempty(buf) && return nothing, pos
-    
+
     first = buf[pos]
     len = ((first & 0xc0) >> 6)
-    
+
     if len == 0
-        return VarInt(first & 0x3f), pos + 1
+        return VarInt(UInt64(first & 0x3f)), pos + 1
     elseif len == 1
         pos + 1 > length(buf) && return nothing, pos
-        val = ((first & 0x3f) << 8) | buf[pos + 1]
+        val = (UInt64(first & 0x3f) << 8) | UInt64(buf[pos + 1])
         return VarInt(val), pos + 2
     elseif len == 2
         pos + 3 > length(buf) && return nothing, pos
-        val = ((first & 0x3f) << 24) | (buf[pos + 1] << 16) | 
-              (buf[pos + 2] << 8) | buf[pos + 3]
+        val = (UInt64(first & 0x3f) << 24) | (UInt64(buf[pos + 1]) << 16) |
+              (UInt64(buf[pos + 2]) << 8) | UInt64(buf[pos + 3])
         return VarInt(val), pos + 4
     else
         pos + 7 > length(buf) && return nothing, pos
-        val = ((first & 0x3f) << 56)
+        val = UInt64(first & 0x3f) << 56
         for i in 1:7
             val |= UInt64(buf[pos + i]) << ((7 - i) * 8)
         end

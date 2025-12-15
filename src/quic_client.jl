@@ -450,6 +450,7 @@ end
 
 function process_initial_payload!(conn::QuicConnection, packet::Vector{UInt8}, pn_offset::Int, payload_len::UInt64)
     if pn_offset + payload_len - 1 > length(packet)
+        @warn "QUIC: Initial payload extends beyond packet"
         return
     end
 
@@ -461,6 +462,7 @@ function process_initial_payload!(conn::QuicConnection, packet::Vector{UInt8}, p
     # Sample for header protection
     sample_offset = pn_offset + 4
     if sample_offset + 15 > length(packet)
+        @warn "QUIC: Initial HP sample extends beyond packet"
         return
     end
     sample = packet[sample_offset:sample_offset+15]
@@ -504,6 +506,7 @@ end
 
 function process_handshake_payload!(conn::QuicConnection, packet::Vector{UInt8}, pn_offset::Int, payload_len::UInt64)
     if pn_offset + payload_len - 1 > length(packet)
+        @warn "QUIC: Handshake payload extends beyond packet"
         return
     end
 
@@ -511,13 +514,21 @@ function process_handshake_payload!(conn::QuicConnection, packet::Vector{UInt8},
     iv = conn.is_client ? conn.handshake_secrets[:server_iv] : conn.handshake_secrets[:client_iv]
     hp_key = conn.is_client ? conn.handshake_secrets[:server_hp] : conn.handshake_secrets[:client_hp]
 
+    is_chacha = conn.handshake.cipher_suite == 0x1303
+
     sample_offset = pn_offset + 4
     if sample_offset + 15 > length(packet)
+        @warn "QUIC: Handshake HP sample extends beyond packet"
         return
     end
     sample = packet[sample_offset:sample_offset+15]
 
-    mask = Crypto.aes_header_protection_mask(hp_key, sample, AES128GCM())
+    # Use appropriate header protection based on cipher suite
+    mask = if is_chacha
+        Crypto.chacha20_header_protection_mask(hp_key, sample)
+    else
+        Crypto.aes_header_protection_mask(hp_key, sample, AES128GCM())
+    end
 
     first_byte_unprotected = packet[1] ⊻ (mask[1] & 0x0f)
     pn_len = 1 + (first_byte_unprotected & 0x03)
@@ -542,14 +553,18 @@ function process_handshake_payload!(conn::QuicConnection, packet::Vector{UInt8},
     ciphertext = packet[ciphertext_start:ciphertext_end]
 
     try
-        plaintext = Crypto.decrypt_aes_gcm(ciphertext, key, iv, pn, aad, AES128GCM())
+        plaintext = if is_chacha
+            Crypto.decrypt_chacha20_poly1305(ciphertext, key, iv, pn, aad)
+        else
+            Crypto.decrypt_aes_gcm(ciphertext, key, iv, pn, aad, AES128GCM())
+        end
         process_frames!(conn, plaintext)
     catch e
         @warn "QUIC: Handshake decryption failed" exception=e
     end
 end
 
-function process_short_header_packet!(conn::QuicConnection, data::Vector{UInt8})
+function process_short_header_packet!(conn::QuicConnection, data::AbstractVector{UInt8})
     # 1-RTT packet processing
     if conn.state != CONNECTED
         return
@@ -559,7 +574,6 @@ end
 
 function process_frames!(conn::QuicConnection, data::Vector{UInt8})
     offset = 1
-
     while offset <= length(data)
         frame_type = data[offset]
 
@@ -574,11 +588,33 @@ function process_frames!(conn::QuicConnection, data::Vector{UInt8})
                 offset += Int(crypto_len)
                 process_crypto_frame!(conn, crypto_data)
             else
+                @warn "QUIC: CRYPTO frame truncated"
                 break
             end
-        elseif frame_type == 0x02  # ACK
-            break  # Skip ACK for now
+        elseif frame_type == 0x02 || frame_type == 0x03  # ACK or ACK_ECN
+            # Parse and skip ACK frame
+            offset += 1  # skip frame type
+            largest_ack, offset = decode_varint_at(data, offset)
+            ack_delay, offset = decode_varint_at(data, offset)
+            ack_range_count, offset = decode_varint_at(data, offset)
+            first_range, offset = decode_varint_at(data, offset)
+
+            # Skip additional ACK ranges
+            for _ in 1:Int(ack_range_count)
+                gap, offset = decode_varint_at(data, offset)
+                range_len, offset = decode_varint_at(data, offset)
+            end
+
+            # If ACK_ECN (0x03), skip ECN counts
+            if frame_type == 0x03
+                ect0, offset = decode_varint_at(data, offset)
+                ect1, offset = decode_varint_at(data, offset)
+                ecn_ce, offset = decode_varint_at(data, offset)
+            end
+        elseif frame_type == 0x01  # PING
+            offset += 1
         else
+            @warn "QUIC: Unknown frame type" frame_type=string(frame_type, base=16)
             break
         end
     end
@@ -594,20 +630,38 @@ function process_crypto_frame!(conn::QuicConnection, data::Vector{UInt8})
         return
     end
 
-    msg_type = data[1]
+    # A CRYPTO frame may contain multiple TLS handshake messages concatenated together
+    # Each message has format: type(1) + length(3) + content(length)
+    offset = 1
+    while offset + 3 <= length(data)
+        msg_type = data[offset]
+        msg_len = (UInt32(data[offset+1]) << 16) | (UInt32(data[offset+2]) << 8) | UInt32(data[offset+3])
+        total_msg_len = Int(msg_len) + 4  # type + length + content
 
-    if msg_type == 0x02  # ServerHello
-        process_server_hello!(conn, data)
-    elseif msg_type == 0x08  # EncryptedExtensions
-        process_encrypted_extensions!(conn, data)
-    elseif msg_type == 0x0d  # CertificateRequest
-        process_certificate_request!(conn, data)
-    elseif msg_type == 0x0b  # Certificate
-        process_certificate!(conn, data)
-    elseif msg_type == 0x0f  # CertificateVerify
-        process_certificate_verify!(conn, data)
-    elseif msg_type == 0x14  # Finished
-        process_finished!(conn, data)
+        if offset + total_msg_len - 1 > length(data)
+            @warn "QUIC: Incomplete TLS message" offset total_msg_len available=(length(data) - offset + 1)
+            break
+        end
+
+        msg_data = data[offset:offset+total_msg_len-1]
+
+        if msg_type == 0x02  # ServerHello
+            process_server_hello!(conn, msg_data)
+        elseif msg_type == 0x08  # EncryptedExtensions
+            process_encrypted_extensions!(conn, msg_data)
+        elseif msg_type == 0x0d  # CertificateRequest
+            process_certificate_request!(conn, msg_data)
+        elseif msg_type == 0x0b  # Certificate
+            process_certificate!(conn, msg_data)
+        elseif msg_type == 0x0f  # CertificateVerify
+            process_certificate_verify!(conn, msg_data)
+        elseif msg_type == 0x14  # Finished
+            process_finished!(conn, msg_data)
+        else
+            @warn "QUIC: Unknown TLS message type" msg_type=string(msg_type, base=16)
+        end
+
+        offset += total_msg_len
     end
 end
 
@@ -622,6 +676,10 @@ function process_server_hello!(conn::QuicConnection, data::Vector{UInt8})
     offset = 39
     session_id_len = data[offset]
     offset += 1 + session_id_len
+
+    # Read cipher suite
+    cipher_suite = (UInt16(data[offset]) << 8) | UInt16(data[offset+1])
+    conn.handshake.cipher_suite = cipher_suite
     offset += 2  # cipher_suite
     offset += 1  # compression
 
@@ -814,19 +872,26 @@ function derive_handshake_secrets!(conn::QuicConnection)
     client_secret = Crypto.hkdf_expand_label(handshake_secret, "c hs traffic", transcript_hash, 32)
     server_secret = Crypto.hkdf_expand_label(handshake_secret, "s hs traffic", transcript_hash, 32)
 
-    conn.handshake_secrets[:client_key] = Crypto.hkdf_expand_label(client_secret, "quic key", UInt8[], 16)
+    # Determine key sizes based on cipher suite
+    # 0x1303 = TLS_CHACHA20_POLY1305_SHA256: 32-byte key, 32-byte HP key
+    # 0x1301 = TLS_AES_128_GCM_SHA256: 16-byte key, 16-byte HP key
+    is_chacha = conn.handshake.cipher_suite == 0x1303
+    key_len = is_chacha ? 32 : 16
+    hp_len = is_chacha ? 32 : 16  # ChaCha20 HP uses 32-byte key
+
+    conn.handshake_secrets[:client_key] = Crypto.hkdf_expand_label(client_secret, "quic key", UInt8[], key_len)
     conn.handshake_secrets[:client_iv] = Crypto.hkdf_expand_label(client_secret, "quic iv", UInt8[], 12)
-    conn.handshake_secrets[:client_hp] = Crypto.hkdf_expand_label(client_secret, "quic hp", UInt8[], 16)
+    conn.handshake_secrets[:client_hp] = Crypto.hkdf_expand_label(client_secret, "quic hp", UInt8[], hp_len)
     conn.handshake_secrets[:client_secret] = client_secret
 
-    conn.handshake_secrets[:server_key] = Crypto.hkdf_expand_label(server_secret, "quic key", UInt8[], 16)
+    conn.handshake_secrets[:server_key] = Crypto.hkdf_expand_label(server_secret, "quic key", UInt8[], key_len)
     conn.handshake_secrets[:server_iv] = Crypto.hkdf_expand_label(server_secret, "quic iv", UInt8[], 12)
-    conn.handshake_secrets[:server_hp] = Crypto.hkdf_expand_label(server_secret, "quic hp", UInt8[], 16)
+    conn.handshake_secrets[:server_hp] = Crypto.hkdf_expand_label(server_secret, "quic hp", UInt8[], hp_len)
     conn.handshake_secrets[:server_secret] = server_secret
 
     conn.handshake_secrets[:handshake_secret] = handshake_secret
 
-    println("QUIC: Derived handshake secrets")
+    println("QUIC: Derived handshake secrets (chacha=$is_chacha, key_len=$key_len)")
 
     # Process buffered packets
     if !isempty(conn.pending_handshake_packets)

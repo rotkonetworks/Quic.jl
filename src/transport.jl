@@ -46,8 +46,8 @@ mutable struct FlowController
 end
 
 # check if we can send more data
-function can_send_data(fc::FlowController, bytes::UInt64)
-    return fc.data_sent + bytes <= fc.max_data_peer
+function can_send_data(fc::FlowController, bytes::Integer)
+    return fc.data_sent + UInt64(bytes) <= fc.max_data_peer
 end
 
 # check if we can open a new stream
@@ -60,20 +60,22 @@ function can_open_stream(fc::FlowController, is_bidi::Bool)
 end
 
 # update flow control on data sent
-function on_data_sent!(fc::FlowController, stream_id::UInt64, bytes::UInt64)
-    fc.data_sent += bytes
+function on_data_sent!(fc::FlowController, stream_id::Integer, bytes::Integer)
+    b = UInt64(bytes)
+    sid = UInt64(stream_id)
+    fc.data_sent += b
 
-    if haskey(fc.stream_windows, stream_id)
-        fc.stream_windows[stream_id] = (
-            max_data = fc.stream_windows[stream_id].max_data,
-            data_sent = fc.stream_windows[stream_id].data_sent + bytes,
-            data_received = fc.stream_windows[stream_id].data_received
+    if haskey(fc.stream_windows, sid)
+        fc.stream_windows[sid] = (
+            max_data = fc.stream_windows[sid].max_data,
+            data_sent = fc.stream_windows[sid].data_sent + b,
+            data_received = fc.stream_windows[sid].data_received
         )
     else
-        fc.stream_windows[stream_id] = (
+        fc.stream_windows[sid] = (
             max_data = fc.max_data,
-            data_sent = bytes,
-            data_received = 0
+            data_sent = b,
+            data_received = UInt64(0)
         )
     end
 end
@@ -105,24 +107,26 @@ function on_data_received!(fc::FlowController, stream_id::UInt64, bytes::UInt64)
 end
 
 # process MAX_DATA frame from peer
-function process_max_data!(fc::FlowController, new_limit::UInt64)
-    fc.max_data_peer = max(fc.max_data_peer, new_limit)
+function process_max_data!(fc::FlowController, new_limit::Integer)
+    fc.max_data_peer = max(fc.max_data_peer, UInt64(new_limit))
 end
 
 # process MAX_STREAM_DATA frame from peer
-function process_max_stream_data!(fc::FlowController, stream_id::UInt64, new_limit::UInt64)
-    if haskey(fc.stream_windows, stream_id)
-        old_window = fc.stream_windows[stream_id]
-        fc.stream_windows[stream_id] = (
-            max_data = max(old_window.max_data, new_limit),
+function process_max_stream_data!(fc::FlowController, stream_id::Integer, new_limit::Integer)
+    sid = UInt64(stream_id)
+    nl = UInt64(new_limit)
+    if haskey(fc.stream_windows, sid)
+        old_window = fc.stream_windows[sid]
+        fc.stream_windows[sid] = (
+            max_data = max(old_window.max_data, nl),
             data_sent = old_window.data_sent,
             data_received = old_window.data_received
         )
     else
-        fc.stream_windows[stream_id] = (
-            max_data = new_limit,
-            data_sent = 0,
-            data_received = 0
+        fc.stream_windows[sid] = (
+            max_data = nl,
+            data_sent = UInt64(0),
+            data_received = UInt64(0)
         )
     end
 end

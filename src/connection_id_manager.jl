@@ -55,8 +55,8 @@ mutable struct ConnectionIdManagerState
 end
 
 # Generate a new connection ID
-function generate_connection_id(length::UInt8 = 8)
-    data = rand(UInt8, length)
+function generate_connection_id(length::Integer = 8)
+    data = rand(UInt8, Int(length))
     return ConnectionId(data)
 end
 
@@ -79,7 +79,7 @@ function issue_new_local_cid!(manager::ConnectionIdManagerState)
     cid_data = ConnectionIdData(
         new_cid,
         manager.next_local_sequence,
-        0,  # retire_prior_to
+        UInt64(0),  # retire_prior_to
         reset_token
     )
 

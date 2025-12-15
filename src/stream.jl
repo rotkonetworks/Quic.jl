@@ -2,6 +2,9 @@ module Stream
 
 using ..Protocol
 
+# Default maximum stream data buffer size (1 MB)
+const MAX_STREAM_DATA_BUFFER = UInt64(1024 * 1024)
+
 struct StreamId
     value::UInt64
     

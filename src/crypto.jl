@@ -201,13 +201,14 @@ function encrypt_chacha20_poly1305(payload::Vector{UInt8}, key::Vector{UInt8}, i
                                    packet_number::UInt64, associated_data::Vector{UInt8})
     lib = get_libsodium()
 
-    # construct nonce by XORing IV with packet number
+    # construct nonce: XOR packet number into the rightmost bytes of IV
+    # Per RFC 9001 Section 5.3: packet number is left-padded with zeros
     nonce = copy(iv)
-    pn_bytes = zeros(UInt8, 12)
-    pn_bytes[5:12] = reinterpret(UInt8, [hton(packet_number)])
+    pn_bytes = reinterpret(UInt8, [hton(packet_number)])
 
-    for i in 1:12
-        nonce[i] ⊻= pn_bytes[i]
+    # XOR packet number into the last 8 bytes of the 12-byte nonce
+    for i in 1:8
+        nonce[end - i + 1] ⊻= pn_bytes[end - i + 1]
     end
 
     # output buffer: ciphertext + tag
@@ -312,13 +313,14 @@ function decrypt_chacha20_poly1305(ciphertext_with_tag::Vector{UInt8}, key::Vect
         error("Ciphertext too short for authentication tag")
     end
 
-    # construct nonce
+    # construct nonce: XOR packet number into the rightmost bytes of IV
+    # Per RFC 9001 Section 5.3: packet number is left-padded with zeros
     nonce = copy(iv)
-    pn_bytes = zeros(UInt8, 12)
-    pn_bytes[5:12] = reinterpret(UInt8, [hton(packet_number)])
+    pn_bytes = reinterpret(UInt8, [hton(packet_number)])
 
-    for i in 1:12
-        nonce[i] ⊻= pn_bytes[i]
+    # XOR packet number into the last 8 bytes of the 12-byte nonce
+    for i in 1:8
+        nonce[end - i + 1] ⊻= pn_bytes[end - i + 1]
     end
 
     # output buffer for plaintext (ciphertext length minus tag)
@@ -473,8 +475,8 @@ end
 function chacha20_header_protection_mask(hp_key::Vector{UInt8}, sample::Vector{UInt8})
     lib = get_libsodium()
 
-    # use first 4 bytes of sample as counter (big-endian per QUIC spec), rest as nonce
-    counter = UInt32(sample[1]) << 24 | UInt32(sample[2]) << 16 | UInt32(sample[3]) << 8 | UInt32(sample[4])
+    # RFC 9001 Section 5.4.4: first 4 bytes of sample as counter (little-endian!)
+    counter = UInt32(sample[4]) << 24 | UInt32(sample[3]) << 16 | UInt32(sample[2]) << 8 | UInt32(sample[1])
 
     nonce = sample[5:16]
 
