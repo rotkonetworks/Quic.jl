@@ -34,14 +34,14 @@ function create_rust_client(host::String=DEFAULT_HOST, port::Int=DEFAULT_PORT)
 
     client = RustQuicNetClient(sock, conn, server_ip, port, false)
 
-    println("🎯 Target server: $host:$port")
+    println(" Target server: $host:$port")
     println()
 
     return client
 end
 
 function send_initial_packet!(client::RustQuicNetClient)
-    println("📤 Sending Initial packet to Rust QuicNet server...")
+    println(" Sending Initial packet to Rust QuicNet server...")
 
     # Create ClientHello
     client_hello = Quic.Handshake.create_client_hello(
@@ -111,7 +111,7 @@ function send_initial_packet!(client::RustQuicNetClient)
 
     # Send packet
     send(client.socket, client.server_addr, client.server_port, packet_data)
-    println("   ✅ Initial packet sent")
+    println("    Initial packet sent")
 
     return packet_data
 end
@@ -164,7 +164,7 @@ function encode_varint(value::Int)
 end
 
 function receive_packets!(client::RustQuicNetClient, timeout_ms::Int=5000)
-    println("\n📥 Waiting for response from Rust server...")
+    println("\n Waiting for response from Rust server...")
 
     start_time = time() * 1000
     packets_received = 0
@@ -182,7 +182,7 @@ function receive_packets!(client::RustQuicNetClient, timeout_ms::Int=5000)
                 if n > 0
                     packets_received += 1
                     data = data[1:n]
-                    println("   📦 Received packet: $(n) bytes from $(from[])")
+                    println("    Received packet: $(n) bytes from $(from[])")
 
                     # Parse packet header
                     if length(data) > 0
@@ -204,7 +204,7 @@ function receive_packets!(client::RustQuicNetClient, timeout_ms::Int=5000)
                     # Check if handshake-related
                     if packets_received == 1
                         client.connected = true
-                        println("   🤝 Handshake response received!")
+                        println("    Handshake response received!")
                     end
                 end
             end
@@ -213,7 +213,7 @@ function receive_packets!(client::RustQuicNetClient, timeout_ms::Int=5000)
 
         catch e
             if !isa(e, Base.IOError)
-                println("   ⚠️  Error receiving: $e")
+                println("     Error receiving: $e")
             end
             break
         end
@@ -224,7 +224,7 @@ function receive_packets!(client::RustQuicNetClient, timeout_ms::Int=5000)
         println("   ℹ️  Make sure the Rust QuicNet server is running:")
         println("      quicnet -l -v")
     else
-        println("   📊 Total packets received: $packets_received")
+        println("    Total packets received: $packets_received")
     end
 
     return packets_received > 0
@@ -232,7 +232,7 @@ end
 
 function test_echo_mode!(client::RustQuicNetClient)
     if !client.connected
-        println("\n⚠️  Not connected - skipping echo test")
+        println("\n  Not connected - skipping echo test")
         return
     end
 
@@ -247,13 +247,13 @@ function test_echo_mode!(client::RustQuicNetClient)
     packet = create_short_header_packet(client, stream_frame)
 
     send(client.socket, client.server_addr, client.server_port, packet)
-    println("   📤 Sent: \"$test_data\"")
+    println("    Sent: \"$test_data\"")
 
     # Wait for echo response
     if receive_packets!(client, 2000)
-        println("   ✅ Echo test completed")
+        println("    Echo test completed")
     else
-        println("   ❌ No echo response")
+        println("    No echo response")
     end
 end
 
@@ -302,7 +302,7 @@ function create_short_header_packet(client::RustQuicNetClient, payload::Vector{U
 end
 
 function run_rust_compatibility_test(host::String=DEFAULT_HOST, port::Int=DEFAULT_PORT)
-    println("🧪 Testing Julia QUIC ↔ Rust QuicNet Compatibility")
+    println(" Testing Julia QUIC ↔ Rust QuicNet Compatibility")
     println("="^50)
 
     # Create client
@@ -314,12 +314,12 @@ function run_rust_compatibility_test(host::String=DEFAULT_HOST, port::Int=DEFAUL
 
         # Wait for response
         if receive_packets!(client)
-            println("\n✅ Successfully communicated with Rust QuicNet server!")
+            println("\n Successfully communicated with Rust QuicNet server!")
 
             # Try echo test if connected
             test_echo_mode!(client)
         else
-            println("\n❌ Failed to establish connection with Rust server")
+            println("\n Failed to establish connection with Rust server")
             println("\nTroubleshooting:")
             println("1. Ensure Rust QuicNet server is running:")
             println("   quicnet -l -v")
@@ -330,7 +330,7 @@ function run_rust_compatibility_test(host::String=DEFAULT_HOST, port::Int=DEFAUL
 
     finally
         close(client.socket)
-        println("\n📊 Connection closed")
+        println("\n Connection closed")
     end
 end
 

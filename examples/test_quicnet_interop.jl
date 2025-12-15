@@ -16,17 +16,17 @@ function test_quicnet_interoperability()
     println("This test suite validates Julia QUIC compatibility with Rust QuicNet")
     println("implementations, ensuring full protocol interoperability.")
 
-    println("\n🔧 Implementation Features Tested:")
-    println("   ✅ QUIC Transport Protocol (RFC 9000/9001)")
-    println("   ✅ TLS 1.3 Handshake with X25519 ECDHE")
-    println("   ✅ ChaCha20-Poly1305 Encryption")
-    println("   ✅ Connection ID Management & Rotation")
-    println("   ✅ Loss Detection & Recovery (RFC 9002)")
-    println("   ✅ Packet Pacing & Congestion Control")
-    println("   ✅ Stream Multiplexing & Flow Control")
-    println("   ✅ HTTP/3 Frame Processing (RFC 9114)")
-    println("   ✅ Connection Migration Support")
-    println("   ✅ Multiple Compatibility Modes")
+    println("\n Implementation Features Tested:")
+    println("    QUIC Transport Protocol (RFC 9000/9001)")
+    println("    TLS 1.3 Handshake with X25519 ECDHE")
+    println("    ChaCha20-Poly1305 Encryption")
+    println("    Connection ID Management & Rotation")
+    println("    Loss Detection & Recovery (RFC 9002)")
+    println("    Packet Pacing & Congestion Control")
+    println("    Stream Multiplexing & Flow Control")
+    println("    HTTP/3 Frame Processing (RFC 9114)")
+    println("    Connection Migration Support")
+    println("    Multiple Compatibility Modes")
 
     println("\n🦀 QuicNet Compatibility Modes:")
     println("   1. QuicNet Mode: Optimized for Rust QuicNet clients")
@@ -54,7 +54,7 @@ function test_quicnet_interoperability()
     println("   Tests: Connection migration, 0-RTT (when available), HTTP/3")
     println("   Expected: Modern QUIC features working with QuicNet")
 
-    println("\n📊 Performance Characteristics:")
+    println("\n Performance Characteristics:")
     println("   • Handshake Time: <100ms typical")
     println("   • Throughput: Limited by congestion control, not implementation")
     println("   • Latency: Minimal overhead, optimized packet processing")
@@ -73,16 +73,16 @@ end
 function run_quicnet_tests()
     results = Dict{String, Bool}()
 
-    println("\n🧪 Running QuicNet compatibility tests...")
+    println("\n Running QuicNet compatibility tests...")
 
     # Test 1: Basic module loading
     println("\n📋 Test 1: Module Loading and Initialization")
     try
         results["module_loading"] = true
-        println("   ✅ All QUIC modules loaded successfully")
+        println("    All QUIC modules loaded successfully")
     catch e
         results["module_loading"] = false
-        println("   ❌ Module loading failed: $e")
+        println("    Module loading failed: $e")
     end
 
     # Test 2: Connection creation
@@ -92,10 +92,10 @@ function run_quicnet_tests()
         conn = Quic.ConnectionModule.Connection(sock, true)
         close(sock)
         results["connection_creation"] = true
-        println("   ✅ QUIC connection created successfully")
+        println("    QUIC connection created successfully")
     catch e
         results["connection_creation"] = false
-        println("   ❌ Connection creation failed: $e")
+        println("    Connection creation failed: $e")
     end
 
     # Test 3: Crypto initialization
@@ -106,10 +106,10 @@ function run_quicnet_tests()
         ctx.cipher_suite = Quic.Crypto.ChaCha20Poly1305()
         Quic.Crypto.derive_initial_secrets!(ctx, conn_id.data)
         results["crypto_system"] = !isempty(ctx.initial_secrets)
-        println("   ✅ ChaCha20-Poly1305 crypto system working")
+        println("    ChaCha20-Poly1305 crypto system working")
     catch e
         results["crypto_system"] = false
-        println("   ❌ Crypto system failed: $e")
+        println("    Crypto system failed: $e")
     end
 
     # Test 4: Frame processing
@@ -125,10 +125,10 @@ function run_quicnet_tests()
         Quic.Frame.encode_frame!(buf, stream_frame)
 
         results["frame_processing"] = length(buf) > 10
-        println("   ✅ QUIC frame encoding/decoding working")
+        println("    QUIC frame encoding/decoding working")
     catch e
         results["frame_processing"] = false
-        println("   ❌ Frame processing failed: $e")
+        println("    Frame processing failed: $e")
     end
 
     # Test 5: HTTP/3 support
@@ -142,10 +142,10 @@ function run_quicnet_tests()
         decoded = Quic.HTTP3.decode_headers_qpack(encoded)
 
         results["http3_support"] = h3_conn.initialized && !isempty(encoded)
-        println("   ✅ HTTP/3 and QPACK processing working")
+        println("    HTTP/3 and QPACK processing working")
     catch e
         results["http3_support"] = false
-        println("   ❌ HTTP/3 support failed: $e")
+        println("    HTTP/3 support failed: $e")
     end
 
     # Test 6: Loss detection
@@ -157,10 +157,10 @@ function run_quicnet_tests()
         Quic.LossDetection.on_packet_sent!(ld, Quic.LossDetection.LDInitial, 1, frames, 1000)
         results["loss_detection"] = ld.bytes_in_flight == 1000
 
-        println("   ✅ Loss detection and recovery system working")
+        println("    Loss detection and recovery system working")
     catch e
         results["loss_detection"] = false
-        println("   ❌ Loss detection failed: $e")
+        println("    Loss detection failed: $e")
     end
 
     # Test 7: Packet pacing
@@ -172,10 +172,10 @@ function run_quicnet_tests()
         can_send = Quic.PacketPacing.can_send_packet(pacing, 1472)
         results["packet_pacing"] = can_send && pacing.pacing_rate > 0
 
-        println("   ✅ Packet pacing system working")
+        println("    Packet pacing system working")
     catch e
         results["packet_pacing"] = false
-        println("   ❌ Packet pacing failed: $e")
+        println("    Packet pacing failed: $e")
     end
 
     # Test 8: Connection ID management
@@ -188,10 +188,10 @@ function run_quicnet_tests()
         new_cid = Quic.ConnectionIdManager.issue_new_local_cid!(manager)
         results["cid_management"] = new_cid !== nothing
 
-        println("   ✅ Connection ID rotation system working")
+        println("    Connection ID rotation system working")
     catch e
         results["cid_management"] = false
-        println("   ❌ Connection ID management failed: $e")
+        println("    Connection ID management failed: $e")
     end
 
     return results
@@ -199,7 +199,7 @@ end
 
 function print_test_summary(results::Dict{String, Bool})
     println("\n" * "="^70)
-    println("📊 QUICNET INTEROPERABILITY TEST SUMMARY")
+    println(" QUICNET INTEROPERABILITY TEST SUMMARY")
     println("="^70)
 
     total_tests = length(results)
@@ -214,20 +214,20 @@ function print_test_summary(results::Dict{String, Bool})
 
     println("\n🔍 Detailed Results:")
     for (test_name, result) in results
-        status = result ? "✅ PASS" : "❌ FAIL"
+        status = result ? " PASS" : " FAIL"
         formatted_name = replace(test_name, "_" => " ") |> titlecase
         println("   $status - $formatted_name")
     end
 
     if passed_tests == total_tests
-        println("\n🎉 ALL TESTS PASSED!")
+        println("\n ALL TESTS PASSED!")
         println("🦀 Julia QUIC is ready for QuicNet interoperability!")
     else
-        println("\n⚠️  Some tests failed. Check the detailed output above.")
+        println("\n  Some tests failed. Check the detailed output above.")
     end
 
     println("\n📖 Usage Instructions:")
-    println("\n🚀 To test with a Rust QuicNet server:")
+    println("\n To test with a Rust QuicNet server:")
     println("   1. Start Rust QuicNet server on port 4433")
     println("   2. Run: julia examples/quicnet_client.jl")
 
@@ -235,16 +235,16 @@ function print_test_summary(results::Dict{String, Bool})
     println("   1. Run: julia examples/quicnet_server.jl")
     println("   2. Connect Rust QuicNet client to localhost:4433")
 
-    println("\n🔄 For bidirectional testing:")
+    println("\n For bidirectional testing:")
     println("   1. Start Julia server: julia examples/quicnet_server.jl")
     println("   2. Start Julia client: julia examples/quicnet_client.jl")
     println("   3. Observe full QUIC communication")
 
-    println("\n🌐 HTTP/3 testing:")
+    println("\n HTTP/3 testing:")
     println("   1. Start HTTP/3 server: julia examples/http3_server.jl")
     println("   2. Use QuicNet HTTP/3 client or julia examples/http3_client.jl")
 
-    println("\n🔧 Advanced features to test:")
+    println("\n Advanced features to test:")
     println("   • Connection migration: Automatic CID rotation")
     println("   • Multiple streams: Concurrent data transfer")
     println("   • Large transfers: Packet pacing and flow control")
@@ -259,15 +259,15 @@ function show_quicnet_compatibility_matrix()
     println("🦀 QUICNET COMPATIBILITY MATRIX")
     println("="^70)
 
-    println("\n📊 Protocol Feature Compatibility:")
+    println("\n Protocol Feature Compatibility:")
     features = [
-        ("QUIC Transport", "✅", "Full RFC 9000/9001 compliance"),
-        ("TLS 1.3 Handshake", "✅", "X25519 ECDHE + ChaCha20-Poly1305"),
-        ("Loss Detection", "✅", "RFC 9002 implementation"),
-        ("Congestion Control", "✅", "NewReno with packet pacing"),
-        ("Connection Migration", "✅", "CID rotation and path validation"),
-        ("Stream Multiplexing", "✅", "Bidirectional and unidirectional"),
-        ("HTTP/3", "✅", "RFC 9114 with QPACK compression"),
+        ("QUIC Transport", "", "Full RFC 9000/9001 compliance"),
+        ("TLS 1.3 Handshake", "", "X25519 ECDHE + ChaCha20-Poly1305"),
+        ("Loss Detection", "", "RFC 9002 implementation"),
+        ("Congestion Control", "", "NewReno with packet pacing"),
+        ("Connection Migration", "", "CID rotation and path validation"),
+        ("Stream Multiplexing", "", "Bidirectional and unidirectional"),
+        ("HTTP/3", "", "RFC 9114 with QPACK compression"),
         ("0-RTT Resumption", "🟡", "Planned implementation"),
         ("DATAGRAM Extension", "🟡", "RFC 9221 support planned"),
         ("WebTransport", "🟡", "Future enhancement")
@@ -277,10 +277,10 @@ function show_quicnet_compatibility_matrix()
         println("   $status $feature - $description")
     end
 
-    println("\n🔄 Interoperability Status:")
+    println("\n Interoperability Status:")
     implementations = [
-        ("Rust Quinn", "✅", "Full compatibility tested"),
-        ("Rust QuicNet", "✅", "Optimized compatibility"),
+        ("Rust Quinn", "", "Full compatibility tested"),
+        ("Rust QuicNet", "", "Optimized compatibility"),
         ("Go quic-go", "🟡", "Basic compatibility expected"),
         ("C++ mvfst", "🟡", "Protocol compliance should work"),
         ("Node.js", "🟡", "Through standard QUIC APIs"),
@@ -291,14 +291,14 @@ function show_quicnet_compatibility_matrix()
         println("   $status $impl - $notes")
     end
 
-    println("\n🎯 Performance Characteristics:")
+    println("\n Performance Characteristics:")
     println("   • Handshake latency: <100ms typical")
     println("   • Throughput: Network-limited, not CPU-limited")
     println("   • Memory usage: ~10KB per connection")
     println("   • CPU usage: Optimized crypto operations")
     println("   • Scalability: Tested with multiple concurrent connections")
 
-    println("\n⚡ Optimization Features:")
+    println("\n Optimization Features:")
     println("   • Zero-copy packet processing where possible")
     println("   • Efficient connection ID management")
     println("   • Adaptive congestion control")
@@ -312,9 +312,9 @@ function main()
 
     println("\n" * "="^80)
     if success
-        println("🎉 QUICNET INTEROPERABILITY: READY FOR PRODUCTION!")
+        println(" QUICNET INTEROPERABILITY: READY FOR PRODUCTION!")
     else
-        println("⚠️  QUICNET INTEROPERABILITY: ISSUES DETECTED")
+        println("  QUICNET INTEROPERABILITY: ISSUES DETECTED")
     end
     println("="^80)
 

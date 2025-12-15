@@ -16,19 +16,19 @@ function test_basic_quicnet()
     println("\n🆔 Testing ConnectionId...")
     cid = Quic.Packet.ConnectionId()
     println("   Created CID: $(bytes2hex(cid.data))")
-    println("   ✅ ConnectionId working")
+    println("    ConnectionId working")
 
     # Test PacketNumber
-    println("\n📦 Testing PacketNumber...")
+    println("\n Testing PacketNumber...")
     pn = Quic.Packet.PacketNumber(42)
     println("   PacketNumber: $(pn.value)")
-    println("   ✅ PacketNumber working")
+    println("    PacketNumber working")
 
     # Test Frame creation
-    println("\n🏗️ Testing Frame types...")
+    println("\n Testing Frame types...")
 
     ping = Quic.Frame.PingFrame()
-    println("   ✅ PING frame created")
+    println("    PING frame created")
 
     ack = Quic.Frame.AckFrame(
         UInt64(10),  # largest
@@ -37,7 +37,7 @@ function test_basic_quicnet()
         Vector{@NamedTuple{gap::UInt64, length::UInt64}}(),  # ranges
         nothing      # ecn_counts
     )
-    println("   ✅ ACK frame created")
+    println("    ACK frame created")
 
     stream = Quic.Frame.StreamFrame(
         UInt64(4),  # stream_id
@@ -45,7 +45,7 @@ function test_basic_quicnet()
         UInt8[0x48, 0x69],  # "Hi"
         false  # fin
     )
-    println("   ✅ STREAM frame created")
+    println("    STREAM frame created")
 
     # Test packet header types
     println("\n📨 Testing Packet headers...")
@@ -56,27 +56,27 @@ function test_basic_quicnet()
         Quic.Packet.ConnectionId(),  # dest_cid
         Quic.Packet.ConnectionId()   # src_cid
     )
-    println("   ✅ Long header created")
+    println("    Long header created")
 
     short_header = Quic.Packet.ShortHeader(
         0x40,  # flags
         Quic.Packet.ConnectionId()  # dest_cid
     )
-    println("   ✅ Short header created")
+    println("    Short header created")
 
     # Test crypto components
-    println("\n🔐 Testing Crypto components...")
+    println("\n Testing Crypto components...")
 
     ctx = Quic.Crypto.CryptoContext()
-    println("   ✅ CryptoContext created")
+    println("    CryptoContext created")
 
     # Test handshake components
-    println("\n🤝 Testing Handshake components...")
+    println("\n Testing Handshake components...")
 
     hs = Quic.Handshake.HandshakeState(:client)
     println("   Role: $(hs.role)")
     println("   State: $(hs.state)")
-    println("   ✅ HandshakeState created")
+    println("    HandshakeState created")
 
     # Test stream state
     println("\n🌊 Testing Stream components...")
@@ -89,19 +89,19 @@ function test_basic_quicnet()
     println("   Stream ID: $(stream_state.stream_id)")
     println("   Type: $(stream_state.stream_type)")
     println("   State: $(stream_state.state)")
-    println("   ✅ StreamState created")
+    println("    StreamState created")
 
-    println("\n✨ All basic tests passed!")
+    println("\n All basic tests passed!")
     return true
 end
 
 # Run the test
 try
     if test_basic_quicnet()
-        println("\n🎉 Basic QuicNet test completed successfully!")
+        println("\n Basic QuicNet test completed successfully!")
     end
 catch e
-    println("\n❌ Test failed: $e")
+    println("\n Test failed: $e")
     for (i, frame) in enumerate(stacktrace())
         println("   $i. $frame")
     end

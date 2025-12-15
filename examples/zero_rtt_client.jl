@@ -35,7 +35,7 @@ function create_zero_rtt_client(server_addr::String, server_port::Int)
     zero_rtt_available = Quic.ZeroRTT.is_zero_rtt_available(server_addr)
 
     if zero_rtt_available
-        println("✅ 0-RTT available for $server_addr - session found in cache")
+        println(" 0-RTT available for $server_addr - session found in cache")
         max_early_data = Quic.ZeroRTT.get_max_early_data_size(server_addr)
         println("   Max early data size: $max_early_data bytes")
 
@@ -51,16 +51,16 @@ end
 
 function send_early_data!(client::ZeroRTTClient, data::Vector{UInt8})
     if !client.zero_rtt_available
-        println("⚠️  Cannot send early data - 0-RTT not available")
+        println("  Cannot send early data - 0-RTT not available")
         return false
     end
 
     if client.early_data_sent
-        println("⚠️  Early data already sent")
+        println("  Early data already sent")
         return false
     end
 
-    println("\n🚀 Sending 0-RTT early data...")
+    println("\n Sending 0-RTT early data...")
     println("   Data: $(String(data))")
     println("   Size: $(length(data)) bytes")
 
@@ -71,7 +71,7 @@ function send_early_data!(client::ZeroRTTClient, data::Vector{UInt8})
     )
 
     if session === nothing
-        println("❌ Session expired or invalid")
+        println(" Session expired or invalid")
         return false
     end
 
@@ -99,7 +99,7 @@ function send_early_data!(client::ZeroRTTClient, data::Vector{UInt8})
     send(client.socket, client.server_addr, client.server_port, packet_data)
 
     client.early_data_sent = true
-    println("✅ Early data sent in 0-RTT packet")
+    println(" Early data sent in 0-RTT packet")
 
     return true
 end
@@ -149,7 +149,7 @@ function serialize_zero_rtt_packet(packet::Quic.ZeroRTT.ZeroRTTPacket)::Vector{U
 end
 
 function complete_handshake!(client::ZeroRTTClient, enable_zero_rtt::Bool=false)
-    println("\n🤝 Starting handshake...")
+    println("\n Starting handshake...")
 
     # Create ClientHello with 0-RTT if available
     client_hello = Quic.Handshake.create_client_hello(
@@ -167,9 +167,9 @@ function complete_handshake!(client::ZeroRTTClient, enable_zero_rtt::Bool=false)
     send(client.socket, client.server_addr, client.server_port, packet_data)
 
     if enable_zero_rtt && client.zero_rtt_available
-        println("✅ ClientHello sent with 0-RTT indication")
+        println(" ClientHello sent with 0-RTT indication")
     else
-        println("✅ ClientHello sent (standard handshake)")
+        println(" ClientHello sent (standard handshake)")
     end
 
     # In a real implementation, we would:
@@ -180,7 +180,7 @@ function complete_handshake!(client::ZeroRTTClient, enable_zero_rtt::Bool=false)
     # 5. Store session for future 0-RTT
 
     # For demo, simulate successful handshake
-    println("✅ Handshake completed (simulated)")
+    println(" Handshake completed (simulated)")
 
     # Store session for next connection (demo)
     if !client.zero_rtt_available
@@ -278,14 +278,14 @@ function run_zero_rtt_demo()
         # Complete handshake with 0-RTT
         complete_handshake!(client2, true)
     else
-        println("⚠️  0-RTT not available, falling back to standard handshake")
+        println("  0-RTT not available, falling back to standard handshake")
         complete_handshake!(client2, false)
     end
 
     close(client2.socket)
 
-    println("\n✨ Demo completed!")
-    println("\n📊 Session Cache Statistics:")
+    println("\n Demo completed!")
+    println("\n Session Cache Statistics:")
     cache = Quic.ZeroRTT.GLOBAL_SESSION_CACHE
     total_sessions = sum(length(v) for v in values(cache.sessions))
     println("   Total sessions cached: $total_sessions")

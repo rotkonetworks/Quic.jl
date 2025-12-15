@@ -45,7 +45,7 @@ function handle_root(request::Dict{String, Any})
         <html>
         <head><title>Julia QUIC HTTP/3 Server</title></head>
         <body>
-            <h1>🚀 Julia QUIC HTTP/3 Server</h1>
+            <h1> Julia QUIC HTTP/3 Server</h1>
             <p>Welcome to the Julia QUIC implementation with HTTP/3 support!</p>
             <ul>
                 <li><strong>Protocol:</strong> HTTP/3 over QUIC</li>
@@ -124,7 +124,7 @@ function handle_http3_connection_events!(server::HTTP3Server, conn, event)
     # Enable HTTP/3 on the connection
     if conn.connected && conn.http3 === nothing
         Quic.ConnectionModule.enable_http3!(conn)
-        println("🌐 HTTP/3 enabled for connection $(bytes2hex(conn.local_cid.data)[1:8])...")
+        println(" HTTP/3 enabled for connection $(bytes2hex(conn.local_cid.data)[1:8])...")
     end
 
     # Process HTTP/3 requests
@@ -151,7 +151,7 @@ function handle_http3_connection_events!(server::HTTP3Server, conn, event)
 end
 
 function handle_http3_request!(server::HTTP3Server, conn, stream_id::UInt64, request_state)
-    println("🌐 Processing HTTP/3 request on stream $stream_id")
+    println(" Processing HTTP/3 request on stream $stream_id")
     println("   Method: $(request_state.method)")
     println("   Path: $(request_state.path)")
 
@@ -185,13 +185,13 @@ function handle_http3_request!(server::HTTP3Server, conn, stream_id::UInt64, req
                 bytes_sent = server.stats.bytes_sent + length(response.body)
             )
 
-            println("✅ HTTP/3 response sent: $(response.status)")
+            println(" HTTP/3 response sent: $(response.status)")
         else
-            println("❌ Failed to send HTTP/3 response")
+            println(" Failed to send HTTP/3 response")
         end
 
     catch e
-        println("❌ Error processing HTTP/3 request: $e")
+        println(" Error processing HTTP/3 request: $e")
 
         # Send error response
         error_response = """
@@ -227,14 +227,14 @@ function handle_not_found(request::Dict{String, Any})
 end
 
 function start_http3_server!(server::HTTP3Server)
-    println("🌐 Starting HTTP/3 server on port $(getsockname(server.quic_server.endpoint.socket)[2])...")
-    println("📊 HTTP/3 capabilities:")
-    println("   ✅ HTTP/3 over QUIC transport")
-    println("   ✅ QPACK header compression")
-    println("   ✅ Multiple concurrent streams")
-    println("   ✅ Server push support (planned)")
-    println("   ✅ TLS 1.3 with modern ciphers")
-    println("   ✅ Automatic flow control")
+    println(" Starting HTTP/3 server on port $(getsockname(server.quic_server.endpoint.socket)[2])...")
+    println(" HTTP/3 capabilities:")
+    println("    HTTP/3 over QUIC transport")
+    println("    QPACK header compression")
+    println("    Multiple concurrent streams")
+    println("    Server push support (planned)")
+    println("    TLS 1.3 with modern ciphers")
+    println("    Automatic flow control")
 
     server.quic_server.running = true
     data = Vector{UInt8}(undef, 65536)
@@ -256,7 +256,7 @@ function start_http3_server!(server::HTTP3Server)
             if isa(e, Base.UVError) && e.code == Base.UV_ETIMEDOUT
                 continue
             else
-                println("❌ HTTP/3 server error: $e")
+                println(" HTTP/3 server error: $e")
                 break
             end
         end
@@ -287,7 +287,7 @@ function handle_client_packet_http3!(server::HTTP3Server, packet_data::Vector{UI
         end
 
     catch e
-        println("⚠️ Error handling HTTP/3 packet from $client_addr: $e")
+        println(" Error handling HTTP/3 packet from $client_addr: $e")
     end
 end
 
@@ -302,7 +302,7 @@ function extract_destination_cid(packet_data::Vector{UInt8})
 end
 
 function handle_new_http3_connection!(server::HTTP3Server, packet_data::Vector{UInt8}, client_addr)
-    println("🌐 New HTTP/3 connection attempt from $client_addr")
+    println(" New HTTP/3 connection attempt from $client_addr")
 
     # Create new QUIC connection
     conn = Quic.ConnectionModule.Connection(server.quic_server.endpoint.socket, false)
@@ -316,7 +316,7 @@ function handle_new_http3_connection!(server::HTTP3Server, packet_data::Vector{U
     result = Quic.PacketReceiver.process_incoming_packet(conn, packet_data, client_addr)
 
     if result !== nothing
-        println("✅ Initial HTTP/3 packet processed: $result")
+        println(" Initial HTTP/3 packet processed: $result")
         handle_http3_connection_events!(server, conn, result)
     end
 end
@@ -331,19 +331,19 @@ function process_active_connections_http3!(server::HTTP3Server)
             handle_http3_connection_events!(server, conn, nothing)
 
             if conn.closing
-                println("👋 HTTP/3 connection $(bytes2hex(cid.data)[1:8])... closing")
+                println(" HTTP/3 connection $(bytes2hex(cid.data)[1:8])... closing")
                 delete!(server.quic_server.active_connections, cid)
             end
 
         catch e
-            println("⚠️ Error processing HTTP/3 connection: $e")
+            println(" Error processing HTTP/3 connection: $e")
             delete!(server.quic_server.active_connections, cid)
         end
     end
 end
 
 function print_http3_server_stats(server::HTTP3Server)
-    println("\n📊 HTTP/3 Server Statistics:")
+    println("\n HTTP/3 Server Statistics:")
     println("   Active connections: $(length(server.quic_server.active_connections))")
     println("   Requests processed: $(server.stats.requests_processed)")
     println("   Responses sent: $(server.stats.responses_sent)")

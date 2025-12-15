@@ -184,7 +184,7 @@ function handle_retry(conn, retry_packet::Vector{UInt8}, header)
         return false
     end
 
-    println("✅ Retry packet verified")
+    println(" Retry packet verified")
 
     # update connection state
     conn.remote_cid = ConnectionId(header.scid)

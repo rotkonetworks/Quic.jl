@@ -8,7 +8,7 @@ using Quic
 using Sockets
 
 function main()
-    println("🚀 Starting Quinn client with packet pacing...")
+    println(" Starting Quinn client with packet pacing...")
 
     # create client socket
     client_addr = Sockets.InetAddr(ip"0.0.0.0", 0)
@@ -26,7 +26,7 @@ function main()
 
     # Display initial pacing state
     initial_pacing = Quic.ConnectionModule.get_pacing_statistics(conn)
-    println("📊 Initial pacing statistics:")
+    println(" Initial pacing statistics:")
     println("   Pacing enabled: $(initial_pacing.pacing_enabled)")
     println("   Pacing rate: $(Int(initial_pacing.pacing_rate)) bytes/sec")
     println("   Burst size: $(initial_pacing.burst_size) bytes")
@@ -35,10 +35,10 @@ function main()
     conn.crypto.cipher_suite = Quic.Crypto.ChaCha20Poly1305()
     Quic.Crypto.derive_initial_secrets!(conn.crypto, conn.remote_cid.data)
 
-    println("🔐 Initialized ChaCha20-Poly1305 encryption")
+    println(" Initialized ChaCha20-Poly1305 encryption")
 
     # initiate handshake
-    println("🤝 Starting TLS 1.3 handshake...")
+    println(" Starting TLS 1.3 handshake...")
     Quic.ConnectionModule.initiate_handshake(conn, "localhost")
 
     # track handshake progress
@@ -60,7 +60,7 @@ function main()
             nbytes, from = recvfrom(conn.socket, data, timeout=1.0)
 
             if nbytes > 0
-                println("📥 Received $(nbytes) bytes from $(from)")
+                println(" Received $(nbytes) bytes from $(from)")
 
                 # process the packet
                 result = Quic.PacketReceiver.process_incoming_packet(
@@ -68,16 +68,16 @@ function main()
                 )
 
                 if result !== nothing
-                    println("✅ Processed packet type: $(result)")
+                    println(" Processed packet type: $(result)")
 
                     # check if handshake completed
                     if conn.connected
                         handshake_complete = true
-                        println("🎉 Handshake completed successfully!")
+                        println(" Handshake completed successfully!")
 
                         # Show pacing stats after handshake
                         post_handshake_pacing = Quic.ConnectionModule.get_pacing_statistics(conn)
-                        println("📊 Post-handshake pacing:")
+                        println(" Post-handshake pacing:")
                         println("   Rate: $(Int(post_handshake_pacing.pacing_rate)) B/s")
                         println("   Current rate: $(Int(post_handshake_pacing.current_rate)) B/s")
                         break
@@ -89,14 +89,14 @@ function main()
             if isa(e, Base.UVError) && e.code == Base.UV_ETIMEDOUT
                 # timeout - handle timers
                 if Quic.LossDetection.should_send_probe_packets(conn.loss_detection)
-                    println("🔄 Sending probe packets (with pacing)")
+                    println(" Sending probe packets (with pacing)")
                     Quic.ConnectionModule.handle_loss_detection_timeout(conn)
                 end
 
                 retry_count += 1
-                println("🔄 Retry $(retry_count)/$(max_retries)")
+                println(" Retry $(retry_count)/$(max_retries)")
             else
-                println("❌ Error: $e")
+                println(" Error: $e")
                 break
             end
         end
@@ -106,7 +106,7 @@ function main()
 
     # Demonstrate packet pacing with burst data transfer
     if handshake_complete
-        println("\n📊 Testing packet pacing with burst data transfer...")
+        println("\n Testing packet pacing with burst data transfer...")
 
         # Open a stream for data transfer
         stream_id = Quic.ConnectionModule.open_stream(conn, true)
@@ -186,7 +186,7 @@ function main()
 
         # Display final pacing statistics
         final_pacing = Quic.ConnectionModule.get_pacing_statistics(conn)
-        println("\n📊 Final pacing statistics:")
+        println("\n Final pacing statistics:")
         println("   Target rate: $(Int(final_pacing.pacing_rate)) bytes/sec")
         println("   Current rate: $(Int(final_pacing.current_rate)) bytes/sec")
         println("   Burst size: $(final_pacing.burst_size) bytes")
@@ -194,7 +194,7 @@ function main()
         println("   Bytes sent this interval: $(final_pacing.bytes_sent_interval)")
 
         # Display loss detection and congestion control stats
-        println("\n📊 Network condition statistics:")
+        println("\n Network condition statistics:")
         println("   RTT: $(conn.loss_detection.smoothed_rtt ÷ 1_000_000) ms")
         println("   CWND: $(conn.cwnd) bytes")
         println("   Bytes in flight: $(conn.loss_detection.bytes_in_flight)")
@@ -203,11 +203,11 @@ function main()
         final_data = Vector{UInt8}(" [Pacing test complete]")
         Quic.ConnectionModule.send_stream(conn, stream_id, final_data, true)
 
-        println("\n✅ Packet pacing demonstration completed!")
+        println("\n Packet pacing demonstration completed!")
         println("🚦 QUIC pacing prevents network congestion and ensures fair bandwidth usage")
 
     else
-        println("\n❌ Handshake failed after $(max_retries) retries")
+        println("\n Handshake failed after $(max_retries) retries")
     end
 
     # Wait for any final packets

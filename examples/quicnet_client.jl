@@ -59,13 +59,13 @@ function connect_to_quicnet_server!(client::QuicNetClient,
     # Configure for QuicNet compatibility
     configure_quicnet_compatibility!(client.connection, client.compatibility_mode)
 
-    println("🔐 Configured QUIC connection for QuicNet compatibility")
+    println(" Configured QUIC connection for QuicNet compatibility")
     println("   Local CID: $(bytes2hex(client.connection.local_cid.data))")
     println("   Remote CID: $(bytes2hex(client.connection.remote_cid.data))")
 
     # Initiate handshake with QuicNet-specific parameters
     handshake_start = time_ns()
-    println("🤝 Starting QUIC handshake with QuicNet server...")
+    println(" Starting QUIC handshake with QuicNet server...")
 
     initiate_quicnet_handshake!(client.connection, server_name)
 
@@ -96,20 +96,20 @@ function configure_quicnet_compatibility!(conn::Quic.ConnectionModule.Connection
         # Set initial RTT estimate suitable for QuicNet
         conn.rtt_ns = 50_000_000  # 50ms initial estimate
 
-        println("🔧 Applied QuicNet-specific optimizations")
+        println(" Applied QuicNet-specific optimizations")
 
     elseif mode == :strict_rfc
         # Strict RFC compliance mode
         conn.crypto.cipher_suite = Quic.Crypto.ChaCha20Poly1305()
         conn.cwnd = 14720
 
-        println("🔧 Applied strict RFC compliance settings")
+        println(" Applied strict RFC compliance settings")
 
     elseif mode == :adaptive
         # Adaptive mode - detect and adjust
         conn.crypto.cipher_suite = Quic.Crypto.ChaCha20Poly1305()
 
-        println("🔧 Applied adaptive compatibility settings")
+        println(" Applied adaptive compatibility settings")
     end
 
     # Derive initial secrets
@@ -122,7 +122,7 @@ function initiate_quicnet_handshake!(conn::Quic.ConnectionModule.Connection, ser
 
     # QuicNet may expect specific transport parameters
     # This would be handled in the handshake module, but we can log it
-    println("📤 Sent Initial packet with QuicNet compatibility")
+    println(" Sent Initial packet with QuicNet compatibility")
 end
 
 function complete_quicnet_handshake!(client::QuicNetClient, handshake_start::UInt64)
@@ -141,7 +141,7 @@ function complete_quicnet_handshake!(client::QuicNetClient, handshake_start::UIn
             nbytes, from = recvfrom(client.connection.socket, data, timeout=1.0)
 
             if nbytes > 0
-                println("📥 Received $(nbytes) bytes from QuicNet server")
+                println(" Received $(nbytes) bytes from QuicNet server")
 
                 # Update stats
                 client.stats = (
@@ -171,7 +171,7 @@ function complete_quicnet_handshake!(client::QuicNetClient, handshake_start::UIn
                         connection_migrations = client.stats.connection_migrations
                     )
 
-                    println("🎉 QuicNet handshake completed in $(round(handshake_time, digits=2)) ms!")
+                    println(" QuicNet handshake completed in $(round(handshake_time, digits=2)) ms!")
                     break
                 end
             end
@@ -180,7 +180,7 @@ function complete_quicnet_handshake!(client::QuicNetClient, handshake_start::UIn
             if isa(e, Base.UVError) && e.code == Base.UV_ETIMEDOUT
                 # Handle QuicNet-specific timeout behavior
                 if Quic.LossDetection.should_send_probe_packets(client.connection.loss_detection)
-                    println("🔄 QuicNet handshake timeout, retransmitting...")
+                    println(" QuicNet handshake timeout, retransmitting...")
                     Quic.ConnectionModule.handle_loss_detection_timeout(client.connection)
 
                     client.stats = (
@@ -194,7 +194,7 @@ function complete_quicnet_handshake!(client::QuicNetClient, handshake_start::UIn
                     )
                 end
             else
-                println("❌ QuicNet handshake error: $e")
+                println(" QuicNet handshake error: $e")
                 return false
             end
         end
@@ -203,7 +203,7 @@ function complete_quicnet_handshake!(client::QuicNetClient, handshake_start::UIn
     end
 
     if !handshake_complete
-        println("❌ QuicNet handshake failed after $(max_handshake_time)s")
+        println(" QuicNet handshake failed after $(max_handshake_time)s")
         return false
     end
 
@@ -233,24 +233,24 @@ function process_quicnet_frame!(client::QuicNetClient, frame, packet_type::Symbo
     # QuicNet-specific frame handling
     if frame isa Quic.Frame.AckFrame
         # QuicNet may have specific ACK behavior
-        println("🔄 QuicNet ACK frame processed: largest=$(frame.largest)")
+        println(" QuicNet ACK frame processed: largest=$(frame.largest)")
 
     elseif frame isa Quic.Frame.CryptoFrame
         # QuicNet crypto handling
-        println("🔐 QuicNet CRYPTO frame: $(length(frame.data)) bytes")
+        println(" QuicNet CRYPTO frame: $(length(frame.data)) bytes")
 
     elseif frame isa Quic.Frame.NewConnectionIdFrame
         # QuicNet connection ID management
-        println("🔄 QuicNet NEW_CONNECTION_ID: seq=$(frame.sequence)")
+        println(" QuicNet NEW_CONNECTION_ID: seq=$(frame.sequence)")
 
     elseif frame isa Quic.Frame.StreamFrame
         # QuicNet stream data
-        println("📊 QuicNet STREAM frame: id=$(frame.stream_id), $(length(frame.data)) bytes")
+        println(" QuicNet STREAM frame: id=$(frame.stream_id), $(length(frame.data)) bytes")
     end
 end
 
 function setup_quicnet_features!(client::QuicNetClient)
-    println("🔧 Setting up QuicNet-specific features...")
+    println(" Setting up QuicNet-specific features...")
 
     # Enable connection ID rotation for mobility
     Quic.ConnectionModule.maintain_connection_ids!(client.connection)
@@ -261,15 +261,15 @@ function setup_quicnet_features!(client::QuicNetClient)
     # Enable HTTP/3 if needed
     if client.compatibility_mode == :quicnet
         Quic.ConnectionModule.enable_http3!(client.connection)
-        println("🌐 HTTP/3 enabled for QuicNet compatibility")
+        println(" HTTP/3 enabled for QuicNet compatibility")
     end
 
-    println("✅ QuicNet features configured")
+    println(" QuicNet features configured")
 end
 
 function send_quicnet_data!(client::QuicNetClient, data::Union{Vector{UInt8}, String})
     if client.connection === nothing || !client.connection.connected
-        println("❌ No active QuicNet connection")
+        println(" No active QuicNet connection")
         return false
     end
 
@@ -283,7 +283,7 @@ function send_quicnet_data!(client::QuicNetClient, data::Union{Vector{UInt8}, St
     bytes_sent = Quic.ConnectionModule.send_stream(client.connection, stream_id, data_bytes, false)
 
     if bytes_sent > 0
-        println("📤 Sent $(bytes_sent) bytes to QuicNet server on stream $(stream_id.value)")
+        println(" Sent $(bytes_sent) bytes to QuicNet server on stream $(stream_id.value)")
 
         # Update stats
         client.stats = (
@@ -306,7 +306,7 @@ function send_quicnet_http_request!(client::QuicNetClient, method::String, path:
                                    headers::Dict{String, String} = Dict{String, String}(),
                                    body::Union{Vector{UInt8}, String} = UInt8[])
     if client.connection === nothing || !client.connection.connected
-        println("❌ No active QuicNet connection")
+        println(" No active QuicNet connection")
         return nothing
     end
 
@@ -324,7 +324,7 @@ function send_quicnet_http_request!(client::QuicNetClient, method::String, path:
         client.connection, method, path, http_headers, body
     )
 
-    println("🌐 Sent HTTP/3 request to QuicNet server:")
+    println(" Sent HTTP/3 request to QuicNet server:")
     println("   $method $path")
     println("   Stream: $(request_stream.value)")
 
@@ -345,7 +345,7 @@ function receive_quicnet_data!(client::QuicNetClient; timeout_s::Float64 = 5.0)
             nbytes, from = recvfrom(client.connection.socket, data, timeout=0.5)
 
             if nbytes > 0
-                println("📥 Received $(nbytes) bytes from QuicNet server")
+                println(" Received $(nbytes) bytes from QuicNet server")
 
                 # Process with QuicNet handling
                 result = process_quicnet_packet!(client, data[1:nbytes], from)
@@ -356,7 +356,7 @@ function receive_quicnet_data!(client::QuicNetClient; timeout_s::Float64 = 5.0)
                         stream_data, fin = Quic.Stream.read_stream!(stream_state, length(stream_state.recv_buf))
                         if !isempty(stream_data)
                             push!(received_data, (stream_id=stream_id, data=stream_data, fin=fin))
-                            println("📊 QuicNet stream $stream_id: $(length(stream_data)) bytes")
+                            println(" QuicNet stream $stream_id: $(length(stream_data)) bytes")
                         end
                     end
                 end
@@ -374,7 +374,7 @@ function receive_quicnet_data!(client::QuicNetClient; timeout_s::Float64 = 5.0)
 
         catch e
             if !isa(e, Base.UVError) || e.code != Base.UV_ETIMEDOUT
-                println("⚠️ Error receiving QuicNet data: $e")
+                println(" Error receiving QuicNet data: $e")
                 break
             end
         end
@@ -388,7 +388,7 @@ function test_quicnet_connection_migration!(client::QuicNetClient)
         return false
     end
 
-    println("🔄 Testing QuicNet connection migration...")
+    println(" Testing QuicNet connection migration...")
 
     # Attempt connection ID rotation
     success = Quic.ConnectionModule.rotate_connection_id!(client.connection)
@@ -409,12 +409,12 @@ function test_quicnet_connection_migration!(client::QuicNetClient)
         stream = send_quicnet_data!(client, test_data)
 
         if stream !== nothing
-            println("✅ QuicNet connection migration successful")
+            println(" QuicNet connection migration successful")
             return true
         end
     end
 
-    println("❌ QuicNet connection migration failed")
+    println(" QuicNet connection migration failed")
     return false
 end
 
@@ -427,7 +427,7 @@ function demonstrate_quicnet_features!(client::QuicNetClient)
     if stream1 !== nothing
         responses = receive_quicnet_data!(client, timeout_s=3.0)
         for response in responses
-            println("✅ Received response: \"$(String(response.data))\"")
+            println(" Received response: \"$(String(response.data))\"")
         end
     end
 
@@ -435,7 +435,7 @@ function demonstrate_quicnet_features!(client::QuicNetClient)
     println("\n📋 Test 2: HTTP/3 over QuicNet")
     http_stream = send_quicnet_http_request!(client, "GET", "/")
     if http_stream !== nothing
-        println("✅ HTTP/3 request sent successfully")
+        println(" HTTP/3 request sent successfully")
         receive_quicnet_data!(client, timeout_s=5.0)
     end
 
@@ -444,14 +444,14 @@ function demonstrate_quicnet_features!(client::QuicNetClient)
     for i in 1:3
         stream = send_quicnet_data!(client, "Concurrent message #$i")
         if stream !== nothing
-            println("✅ Sent concurrent message $i")
+            println(" Sent concurrent message $i")
         end
         sleep(0.1)
     end
 
     # Receive all responses
     all_responses = receive_quicnet_data!(client, timeout_s=5.0)
-    println("✅ Received $(length(all_responses)) concurrent responses")
+    println(" Received $(length(all_responses)) concurrent responses")
 
     # Test 4: Connection migration
     println("\n📋 Test 4: Connection migration")
@@ -462,16 +462,16 @@ function demonstrate_quicnet_features!(client::QuicNetClient)
     large_data = "Large QuicNet test: " * "X" * 5000 * " [END]"
     large_stream = send_quicnet_data!(client, large_data)
     if large_stream !== nothing
-        println("✅ Large data sent: $(length(large_data)) bytes")
+        println(" Large data sent: $(length(large_data)) bytes")
         large_responses = receive_quicnet_data!(client, timeout_s=10.0)
         for response in large_responses
-            println("✅ Large response: $(length(response.data)) bytes")
+            println(" Large response: $(length(response.data)) bytes")
         end
     end
 end
 
 function print_quicnet_stats(client::QuicNetClient)
-    println("\n📊 QuicNet Compatibility Statistics:")
+    println("\n QuicNet Compatibility Statistics:")
     println("   Server: $(client.server_info.host):$(client.server_info.port)")
     println("   Compatibility mode: $(client.compatibility_mode)")
     println("   Handshake time: $(round(client.stats.handshake_time_ms, digits=2)) ms")
@@ -484,7 +484,7 @@ function print_quicnet_stats(client::QuicNetClient)
 
     if client.connection !== nothing
         # Network performance stats
-        println("\n📊 QuicNet Network Performance:")
+        println("\n QuicNet Network Performance:")
         println("   RTT: $(client.connection.loss_detection.smoothed_rtt ÷ 1_000_000) ms")
         println("   CWND: $(client.connection.cwnd) bytes")
 
@@ -499,7 +499,7 @@ function print_quicnet_stats(client::QuicNetClient)
 
         # HTTP/3 stats if enabled
         if client.connection.http3 !== nothing
-            println("\n📊 HTTP/3 over QuicNet:")
+            println("\n HTTP/3 over QuicNet:")
             println("   Control stream: $(client.connection.http3.control_stream_id)")
             println("   Peer control stream: $(client.connection.http3.peer_control_stream_id)")
             println("   Settings exchanged: $(length(client.connection.http3.peer_settings))")
@@ -514,7 +514,7 @@ function disconnect_from_quicnet!(client::QuicNetClient)
         Quic.ConnectionModule.queue_frame!(client.connection, close_frame, Quic.PacketCoalescing.Application)
         Quic.ConnectionModule.flush_packets!(client.connection)
 
-        println("👋 Sent connection close to QuicNet server")
+        println(" Sent connection close to QuicNet server")
     end
 
     close(client.endpoint.socket)
@@ -533,7 +533,7 @@ function main()
         try
             # Connect to QuicNet server
             if !connect_to_quicnet_server!(client, "127.0.0.1", 4433, "localhost")
-                println("❌ Failed to connect to QuicNet server in $mode mode")
+                println(" Failed to connect to QuicNet server in $mode mode")
                 continue
             end
 
@@ -543,10 +543,10 @@ function main()
             # Print statistics
             print_quicnet_stats(client)
 
-            println("\n✅ QuicNet compatibility test ($mode) completed!")
+            println("\n QuicNet compatibility test ($mode) completed!")
 
         catch e
-            println("❌ QuicNet client error ($mode): $e")
+            println(" QuicNet client error ($mode): $e")
         finally
             disconnect_from_quicnet!(client)
         end

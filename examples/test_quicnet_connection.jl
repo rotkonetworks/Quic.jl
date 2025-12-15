@@ -16,10 +16,10 @@ function test_quicnet_connection()
     sock = UDPSocket()
     conn = Quic.ConnectionModule.Connection(sock, true)
 
-    println("   ✅ Connection created")
+    println("    Connection created")
 
     # Test initial packet creation
-    println("\n📦 Creating Initial packet...")
+    println("\n Creating Initial packet...")
 
     # Create Initial packet with CRYPTO frame containing ClientHello
     initial_packet = Quic.Packet.InitialPacket(
@@ -29,21 +29,21 @@ function test_quicnet_connection()
         UInt8[]  # Payload (would contain CRYPTO frames)
     )
 
-    println("   ✅ Initial packet created")
+    println("    Initial packet created")
 
     # Test handshake state
-    println("\n🤝 Testing handshake state...")
+    println("\n Testing handshake state...")
 
     hs = conn.handshake_state
     println("   State: $(hs.state)")
     println("   Role: $(hs.role)")
 
     # Test frame creation
-    println("\n🏗️ Testing frame creation...")
+    println("\n Testing frame creation...")
 
     # Create PING frame
     ping_frame = Quic.Frame.PingFrame()
-    println("   ✅ PING frame created")
+    println("    PING frame created")
 
     # Create ACK frame
     ack_frame = Quic.Frame.AckFrame(
@@ -53,7 +53,7 @@ function test_quicnet_connection()
         Vector{@NamedTuple{gap::UInt64, length::UInt64}}(),  # ranges
         nothing                         # ecn_counts
     )
-    println("   ✅ ACK frame created")
+    println("    ACK frame created")
 
     # Create STREAM frame
     stream_frame = Quic.Frame.StreamFrame(
@@ -62,10 +62,10 @@ function test_quicnet_connection()
         UInt8[0x48, 0x65, 0x6c, 0x6c, 0x6f],  # "Hello"
         true            # fin
     )
-    println("   ✅ STREAM frame created")
+    println("    STREAM frame created")
 
     # Test packet coalescing
-    println("\n📦 Testing packet coalescing...")
+    println("\n Testing packet coalescing...")
 
     coalescer = conn.packet_coalescer
     println("   Max size: $(coalescer.max_size)")
@@ -86,7 +86,7 @@ function test_quicnet_connection()
     println("   Current remote CID: $(bytes2hex(current_remote.cid.data))")
 
     # Test pacing state
-    println("\n⏱️ Testing packet pacing...")
+    println("\n Testing packet pacing...")
 
     pacing = conn.pacing_state
     println("   Pacing rate: $(pacing.pacing_rate) bytes/sec")
@@ -95,16 +95,16 @@ function test_quicnet_connection()
     # Clean up
     close(sock)
 
-    println("\n✨ All tests completed successfully!")
+    println("\n All tests completed successfully!")
     return true
 end
 
 # Run the test
 try
     if test_quicnet_connection()
-        println("\n🎉 QuicNet connection test passed!")
+        println("\n QuicNet connection test passed!")
     end
 catch e
-    println("\n❌ Test failed: $e")
+    println("\n Test failed: $e")
     println(stacktrace())
 end

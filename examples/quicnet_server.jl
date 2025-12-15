@@ -43,14 +43,14 @@ function start_quicnet_server!(server::QuicNetServer)
     port = getsockname(server.endpoint.socket)[2]
 
     println("🦀 QuicNet-Compatible Server starting on port $port...")
-    println("📊 Server capabilities ($(server.compatibility_mode) mode):")
-    println("   ✅ QuicNet client compatibility")
-    println("   ✅ TLS 1.3 with ChaCha20-Poly1305")
-    println("   ✅ Connection migration support")
-    println("   ✅ HTTP/3 over QUIC")
-    println("   ✅ Multiple stream types")
-    println("   ✅ Adaptive congestion control")
-    println("   ✅ Advanced loss detection")
+    println(" Server capabilities ($(server.compatibility_mode) mode):")
+    println("    QuicNet client compatibility")
+    println("    TLS 1.3 with ChaCha20-Poly1305")
+    println("    Connection migration support")
+    println("    HTTP/3 over QUIC")
+    println("    Multiple stream types")
+    println("    Adaptive congestion control")
+    println("    Advanced loss detection")
     println()
 
     data = Vector{UInt8}(undef, 65536)
@@ -71,7 +71,7 @@ function start_quicnet_server!(server::QuicNetServer)
             if isa(e, Base.UVError) && e.code == Base.UV_ETIMEDOUT
                 continue
             else
-                println("❌ QuicNet server error: $e")
+                println(" QuicNet server error: $e")
                 break
             end
         end
@@ -103,7 +103,7 @@ function handle_quicnet_packet!(server::QuicNetServer, packet_data::Vector{UInt8
         end
 
     catch e
-        println("⚠️ Error handling QuicNet packet from $client_addr: $e")
+        println(" Error handling QuicNet packet from $client_addr: $e")
     end
 end
 
@@ -143,7 +143,7 @@ function handle_new_quicnet_connection!(server::QuicNetServer, packet_data::Vect
     result = Quic.PacketReceiver.process_incoming_packet(conn, packet_data, client_addr)
 
     if result !== nothing
-        println("✅ Initial QuicNet packet processed: $result")
+        println(" Initial QuicNet packet processed: $result")
         handle_quicnet_connection_events!(server, conn, result, packet_data)
     end
 end
@@ -157,21 +157,21 @@ function configure_quicnet_server_connection!(conn::Quic.ConnectionModule.Connec
         conn.cwnd = 14720  # QuicNet-compatible initial window
         conn.rtt_ns = 50_000_000  # 50ms initial estimate
 
-        println("🔧 Configured for QuicNet client compatibility")
+        println(" Configured for QuicNet client compatibility")
 
     elseif mode == :universal
         # Universal compatibility
         conn.cwnd = 14720
         conn.rtt_ns = 100_000_000  # 100ms conservative estimate
 
-        println("🔧 Configured for universal QUIC compatibility")
+        println(" Configured for universal QUIC compatibility")
 
     elseif mode == :strict_rfc
         # Strict RFC compliance
         conn.cwnd = 14720
         conn.rtt_ns = 333_000_000  # RFC default
 
-        println("🔧 Configured for strict RFC compliance")
+        println(" Configured for strict RFC compliance")
     end
 
     # Enable optimal features for QuicNet
@@ -204,7 +204,7 @@ function handle_quicnet_connection_events!(server::QuicNetServer, conn, event, p
 end
 
 function setup_quicnet_connection!(server::QuicNetServer, conn)
-    println("🔧 Setting up QuicNet connection features...")
+    println(" Setting up QuicNet connection features...")
 
     # Enable HTTP/3 for QuicNet compatibility
     Quic.ConnectionModule.enable_http3!(conn)
@@ -215,7 +215,7 @@ function setup_quicnet_connection!(server::QuicNetServer, conn)
 
     Quic.ConnectionModule.send_stream(conn, welcome_stream, welcome_msg, false)
 
-    println("📤 Sent QuicNet welcome message on stream $(welcome_stream.value)")
+    println(" Sent QuicNet welcome message on stream $(welcome_stream.value)")
 
     # Maintain connection IDs for migration support
     Quic.ConnectionModule.maintain_connection_ids!(conn)
@@ -227,7 +227,7 @@ function handle_quicnet_stream_data!(server::QuicNetServer, conn, stream_id::UIn
 
     if !isempty(data)
         message = String(data)
-        println("📥 QuicNet stream $stream_id: \"$message\"")
+        println(" QuicNet stream $stream_id: \"$message\"")
 
         # Detect if this is HTTP/3 data
         if conn.http3 !== nothing
@@ -263,7 +263,7 @@ function handle_quicnet_http3_request!(server::QuicNetServer, conn, stream_id::U
             method = get(headers, ":method", "")
             path = get(headers, ":path", "/")
 
-            println("🌐 QuicNet HTTP/3 request: $method $path")
+            println(" QuicNet HTTP/3 request: $method $path")
 
             # Generate response based on path
             response_body = if path == "/"
@@ -316,7 +316,7 @@ function handle_quicnet_http3_request!(server::QuicNetServer, conn, stream_id::U
             )
 
             if success
-                println("📤 QuicNet HTTP/3 response sent: $status")
+                println(" QuicNet HTTP/3 response sent: $status")
 
                 server.stats = (
                     connections_accepted = server.stats.connections_accepted,
@@ -333,17 +333,17 @@ end
 
 function handle_quicnet_data_message!(server::QuicNetServer, conn, stream_id::UInt64, message::String, fin::Bool)
     # Process regular QUIC data from QuicNet client
-    println("📊 Processing QuicNet data message: \"$message\"")
+    println(" Processing QuicNet data message: \"$message\"")
 
     # Generate echo response with QuicNet-specific info
     response_data = if contains(message, "migration")
-        "QuicNet migration test acknowledged - Julia QUIC supports connection migration ✅"
+        "QuicNet migration test acknowledged - Julia QUIC supports connection migration "
     elseif contains(message, "Hello")
         "Hello back from Julia QUIC! QuicNet compatibility confirmed 🦀"
     elseif contains(message, "test")
         "QuicNet test response: Connection working perfectly with Julia QUIC implementation"
     else
-        "Julia QUIC server received: \"$message\" - QuicNet interoperability active 🚀"
+        "Julia QUIC server received: \"$message\" - QuicNet interoperability active "
     end
 
     # Send response on same stream
@@ -353,7 +353,7 @@ function handle_quicnet_data_message!(server::QuicNetServer, conn, stream_id::UI
     bytes_sent = Quic.ConnectionModule.send_stream(conn, stream_sid, response_bytes, fin)
 
     if bytes_sent > 0
-        println("📤 QuicNet response sent: \"$response_data\"")
+        println(" QuicNet response sent: \"$response_data\"")
 
         server.stats = (
             connections_accepted = server.stats.connections_accepted,
@@ -391,19 +391,19 @@ function process_quicnet_connections!(server::QuicNetServer)
 
             # Check for connection closure
             if conn.closing
-                println("👋 QuicNet connection $(bytes2hex(cid.data)[1:8])... closing")
+                println(" QuicNet connection $(bytes2hex(cid.data)[1:8])... closing")
                 delete!(server.active_connections, cid)
             end
 
         catch e
-            println("⚠️ Error processing QuicNet connection $(bytes2hex(cid.data)[1:8])...: $e")
+            println(" Error processing QuicNet connection $(bytes2hex(cid.data)[1:8])...: $e")
             delete!(server.active_connections, cid)
         end
     end
 end
 
 function print_quicnet_server_stats(server::QuicNetServer)
-    println("\n📊 QuicNet Server Statistics:")
+    println("\n QuicNet Server Statistics:")
     println("   Compatibility mode: $(server.compatibility_mode)")
     println("   Active connections: $(length(server.active_connections))")
     println("   Total connections: $(server.stats.connections_accepted)")
@@ -443,7 +443,7 @@ function stop_quicnet_server!(server::QuicNetServer)
             Quic.ConnectionModule.queue_frame!(conn, close_frame, Quic.PacketCoalescing.Application)
             Quic.ConnectionModule.flush_packets!(conn)
         catch e
-            println("⚠️ Error closing QuicNet connection: $e")
+            println(" Error closing QuicNet connection: $e")
         end
     end
 

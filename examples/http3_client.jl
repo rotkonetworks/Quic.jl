@@ -38,7 +38,7 @@ mutable struct HTTP3Client
 end
 
 function connect_to_server!(client::HTTP3Client, server_host::String = "127.0.0.1", server_port::Int = 443)
-    println("🌐 Connecting to HTTP/3 server at $server_host:$server_port...")
+    println(" Connecting to HTTP/3 server at $server_host:$server_port...")
 
     # Create QUIC connection
     server_addr = Sockets.InetAddr(ip"127.0.0.1", server_port)
@@ -48,11 +48,11 @@ function connect_to_server!(client::HTTP3Client, server_host::String = "127.0.0.
     client.connection.crypto.cipher_suite = Quic.Crypto.ChaCha20Poly1305()
     Quic.Crypto.derive_initial_secrets!(client.connection.crypto, client.connection.remote_cid.data)
 
-    println("🔐 QUIC crypto initialized")
+    println(" QUIC crypto initialized")
 
     # Complete QUIC handshake
     handshake_start = time_ns()
-    println("🤝 Starting QUIC handshake...")
+    println(" Starting QUIC handshake...")
     Quic.ConnectionModule.initiate_handshake(client.connection, server_host)
 
     # Wait for handshake completion
@@ -71,7 +71,7 @@ function connect_to_server!(client::HTTP3Client, server_host::String = "127.0.0.
 
                 if client.connection.connected
                     handshake_time = (time_ns() - handshake_start) / 1_000_000
-                    println("🎉 QUIC handshake completed in $(round(handshake_time, digits=2)) ms!")
+                    println(" QUIC handshake completed in $(round(handshake_time, digits=2)) ms!")
                     break
                 end
             end
@@ -81,19 +81,19 @@ function connect_to_server!(client::HTTP3Client, server_host::String = "127.0.0.
                     Quic.ConnectionModule.handle_loss_detection_timeout(client.connection)
                 end
             else
-                println("❌ Handshake error: $e")
+                println(" Handshake error: $e")
                 return false
             end
         end
     end
 
     if !client.connection.connected
-        println("❌ QUIC handshake failed")
+        println(" QUIC handshake failed")
         return false
     end
 
     # Enable HTTP/3
-    println("🌐 Enabling HTTP/3...")
+    println(" Enabling HTTP/3...")
     Quic.ConnectionModule.enable_http3!(client.connection)
 
     # Wait for HTTP/3 setup
@@ -129,7 +129,7 @@ function process_incoming_data!(client::HTTP3Client)
             end
         catch e
             if !isa(e, Base.UVError) || e.code != Base.UV_ETIMEDOUT
-                println("⚠️ Error receiving data: $e")
+                println(" Error receiving data: $e")
             end
             break
         end
@@ -140,7 +140,7 @@ function send_http_request!(client::HTTP3Client, method::String, path::String,
                            headers::Dict{String, String} = Dict{String, String}(),
                            body::Union{Vector{UInt8}, String} = UInt8[])
     if client.connection === nothing || !client.connection.connected
-        println("❌ No active QUIC connection")
+        println(" No active QUIC connection")
         return nothing
     end
 
@@ -186,7 +186,7 @@ function send_http_request!(client::HTTP3Client, method::String, path::String,
         bytes_received = client.stats.bytes_received
     )
 
-    println("📤 HTTP/3 request sent:")
+    println(" HTTP/3 request sent:")
     println("   $method $path")
     println("   Stream: $(request_stream.value)")
 
@@ -227,13 +227,13 @@ function make_http_request(client::HTTP3Client, method::String, path::String,
 end
 
 function demonstrate_http3_features!(client::HTTP3Client)
-    println("\n🌐 Demonstrating HTTP/3 features...")
+    println("\n Demonstrating HTTP/3 features...")
 
     # Test 1: Simple GET request
     println("\n📋 Test 1: Simple GET request")
     response1 = make_http_request(client, "GET", "/")
     if response1 !== nothing
-        println("✅ GET / - Status: $(response1.response_status)")
+        println(" GET / - Status: $(response1.response_status)")
         println("   Response body: $(length(response1.response_body)) bytes")
         if length(response1.response_body) < 500
             println("   Content: \"$(String(response1.response_body))\"")
@@ -248,7 +248,7 @@ function demonstrate_http3_features!(client::HTTP3Client)
     )
     response2 = make_http_request(client, "GET", "/api/test", custom_headers)
     if response2 !== nothing
-        println("✅ GET /api/test - Status: $(response2.response_status)")
+        println(" GET /api/test - Status: $(response2.response_status)")
     end
 
     # Test 3: POST with body
@@ -259,7 +259,7 @@ function demonstrate_http3_features!(client::HTTP3Client)
     json_body = """{"message": "Hello from Julia HTTP/3 client!", "timestamp": "$(now())"}"""
     response3 = make_http_request(client, "POST", "/api/data", post_headers, json_body)
     if response3 !== nothing
-        println("✅ POST /api/data - Status: $(response3.response_status)")
+        println(" POST /api/data - Status: $(response3.response_status)")
     end
 
     # Test 4: Multiple concurrent requests
@@ -277,7 +277,7 @@ function demonstrate_http3_features!(client::HTTP3Client)
     for stream_id in concurrent_streams
         response = wait_for_response!(client, stream_id, timeout_s=5.0)
         if response !== nothing
-            println("✅ Concurrent request $stream_id - Status: $(response.response_status)")
+            println(" Concurrent request $stream_id - Status: $(response.response_status)")
         end
     end
 
@@ -285,13 +285,13 @@ function demonstrate_http3_features!(client::HTTP3Client)
     println("\n📋 Test 5: Large response test")
     response5 = make_http_request(client, "GET", "/large", timeout_s=15.0)
     if response5 !== nothing
-        println("✅ GET /large - Status: $(response5.response_status)")
+        println(" GET /large - Status: $(response5.response_status)")
         println("   Large response: $(length(response5.response_body)) bytes")
     end
 end
 
 function print_client_stats(client::HTTP3Client)
-    println("\n📊 HTTP/3 Client Statistics:")
+    println("\n HTTP/3 Client Statistics:")
     println("   Requests sent: $(client.stats.requests_sent)")
     println("   Responses received: $(client.stats.responses_received)")
     println("   Bytes sent: $(client.stats.bytes_sent)")
@@ -300,7 +300,7 @@ function print_client_stats(client::HTTP3Client)
 
     if client.connection !== nothing && client.connection.http3 !== nothing
         h3 = client.connection.http3
-        println("\n📊 HTTP/3 Connection State:")
+        println("\n HTTP/3 Connection State:")
         println("   Control stream: $(h3.control_stream_id)")
         println("   Peer control stream: $(h3.peer_control_stream_id)")
         println("   Local settings: $(length(h3.local_settings))")
@@ -323,7 +323,7 @@ function print_client_stats(client::HTTP3Client)
 
     # Network statistics
     if client.connection !== nothing
-        println("\n📊 QUIC Network Statistics:")
+        println("\n QUIC Network Statistics:")
         println("   RTT: $(client.connection.loss_detection.smoothed_rtt ÷ 1_000_000) ms")
         println("   CWND: $(client.connection.cwnd) bytes")
 
@@ -349,7 +349,7 @@ function disconnect!(client::HTTP3Client)
         Quic.ConnectionModule.queue_frame!(client.connection, close_frame, Quic.PacketCoalescing.Application)
         Quic.ConnectionModule.flush_packets!(client.connection)
 
-        println("👋 Sent HTTP/3 GOAWAY and QUIC connection close")
+        println(" Sent HTTP/3 GOAWAY and QUIC connection close")
     end
 
     close(client.endpoint.socket)
@@ -363,7 +363,7 @@ function main()
         # Connect to server (change port as needed)
         server_port = 4433  # or 443 for HTTPS
         if !connect_to_server!(client, "127.0.0.1", server_port)
-            println("❌ Failed to connect to HTTP/3 server")
+            println(" Failed to connect to HTTP/3 server")
             return false
         end
 
@@ -373,10 +373,10 @@ function main()
         # Print final statistics
         print_client_stats(client)
 
-        println("\n✅ HTTP/3 over QUIC demonstration completed!")
+        println("\n HTTP/3 over QUIC demonstration completed!")
 
     catch e
-        println("❌ HTTP/3 client error: $e")
+        println(" HTTP/3 client error: $e")
         return false
     finally
         disconnect!(client)

@@ -381,7 +381,7 @@ function process_mls_crypto_data(conn::Connection, data::Vector{UInt8})
     success = MLS.process_crypto_data(conn.mls_conn, data)
 
     if !success
-        println("❌ MLS handshake error: $(conn.mls_conn.error_message)")
+        println(" MLS handshake error: $(conn.mls_conn.error_message)")
         conn.error_code = UInt64(0x0100)  # CRYPTO_ERROR
         return
     end
@@ -434,7 +434,7 @@ function complete_mls_handshake!(conn::Connection)
     conn.connected = true
 
     epoch = MLS.get_epoch(conn.mls_conn)
-    println("🔐 MLS handshake complete (epoch $epoch)")
+    println(" MLS handshake complete (epoch $epoch)")
 end
 
 """
@@ -490,7 +490,7 @@ function flush_packets!(conn::Connection)
         sent_bytes = send(conn.socket, conn.remote_addr.host, conn.remote_addr.port, datagram)
         conn.bytes_in_flight += length(datagram)
 
-        println("📤 Sent coalesced datagram: $(length(datagram)) bytes")
+        println(" Sent coalesced datagram: $(length(datagram)) bytes")
         return sent_bytes
     end
 
@@ -555,7 +555,7 @@ function rotate_connection_id!(conn::Connection)
     new_cid = ConnectionIdManager.initiate_path_migration!(conn.cid_manager)
     if new_cid !== nothing
         conn.remote_cid = new_cid
-        println("🔄 Rotated to new connection ID: $(bytes2hex(new_cid.data))")
+        println(" Rotated to new connection ID: $(bytes2hex(new_cid.data))")
         return true
     end
     return false
@@ -598,7 +598,7 @@ function maintain_connection_ids!(conn::Connection)
         end
 
         if !isempty(new_frames)
-            println("🆕 Issued $(length(new_frames)) new connection IDs")
+            println(" Issued $(length(new_frames)) new connection IDs")
             flush_packets!(conn)
         end
 
@@ -631,7 +631,7 @@ end
 # Enable or disable packet pacing
 function set_pacing_enabled!(conn::Connection, enabled::Bool)
     PacketPacing.set_pacing_enabled!(conn.pacing_state, enabled)
-    println("📊 Packet pacing $(enabled ? "enabled" : "disabled")")
+    println(" Packet pacing $(enabled ? "enabled" : "disabled")")
 end
 
 # Update pacing parameters based on network conditions
@@ -644,7 +644,7 @@ function update_pacing_parameters!(conn::Connection)
 
     # Log current pacing state
     stats = get_pacing_statistics(conn)
-    println("📊 Updated pacing: rate=$(Int(stats.pacing_rate)) B/s, burst=$(stats.burst_size) bytes")
+    println(" Updated pacing: rate=$(Int(stats.pacing_rate)) B/s, burst=$(stats.burst_size) bytes")
 end
 
 # Check if pacing would significantly delay transmission
@@ -656,7 +656,7 @@ end
 function send_immediate_bypassing_pacing(conn::Connection, data::Vector{UInt8})
     if conn.remote_addr !== nothing
         send(conn.socket, conn.remote_addr.host, conn.remote_addr.port, data)
-        println("⚡ Sent $(length(data)) bytes bypassing pacing")
+        println(" Sent $(length(data)) bytes bypassing pacing")
     end
 end
 
@@ -683,7 +683,7 @@ function enable_http3!(conn::Connection)
         HTTP3.encode_http3_frame!(settings_data, settings_frame)
         send_stream(conn, control_stream, settings_data, false)
 
-        println("🌐 HTTP/3 enabled on connection")
+        println(" HTTP/3 enabled on connection")
         println("   Control stream: $(control_stream.value)")
         return true
     end
@@ -724,7 +724,7 @@ function send_http_request!(conn::Connection, method::String, path::String,
         send_stream(conn, request_stream, frame_data, true)
     end
 
-    println("📤 HTTP/3 $method request sent to $path")
+    println(" HTTP/3 $method request sent to $path")
     println("   Stream: $(request_stream.value)")
     println("   Headers: $headers")
 
@@ -736,7 +736,7 @@ function send_http_response!(conn::Connection, stream_id::StreamId, status::Int,
                             headers::Dict{String, String} = Dict{String, String}(),
                             body::Union{Vector{UInt8}, String} = UInt8[])
     if conn.http3 === nothing
-        println("❌ HTTP/3 not enabled on connection")
+        println(" HTTP/3 not enabled on connection")
         return false
     end
 
@@ -762,7 +762,7 @@ function send_http_response!(conn::Connection, stream_id::StreamId, status::Int,
         send_stream(conn, stream_id, frame_data, true)
     end
 
-    println("📤 HTTP/3 response sent: $status")
+    println(" HTTP/3 response sent: $status")
     println("   Stream: $(stream_id.value)")
     println("   Headers: $headers")
 
@@ -808,7 +808,7 @@ function process_http3_control_stream!(conn::Connection, stream_id::UInt64, data
         # First data on peer control stream - check stream type
         if !isempty(data) && data[1] == HTTP3.HTTP3_STREAM_CONTROL
             conn.http3.peer_control_stream_id = stream_id
-            println("🌐 Peer HTTP/3 control stream identified: $stream_id")
+            println(" Peer HTTP/3 control stream identified: $stream_id")
             # Process remaining data
             if length(data) > 1
                 return process_http3_data!(conn, stream_id, data[2:end])
@@ -824,7 +824,7 @@ end
 # Process individual HTTP/3 frame
 function process_http3_frame!(conn::Connection, stream_id::UInt64, frame::HTTP3.HTTP3Frame)
     if frame isa HTTP3.HTTP3SettingsFrame
-        println("🌐 Received HTTP/3 SETTINGS frame")
+        println(" Received HTTP/3 SETTINGS frame")
         HTTP3.process_settings_frame!(conn.http3, frame)
 
         for (id, value) in frame.settings
@@ -841,7 +841,7 @@ function process_http3_frame!(conn::Connection, stream_id::UInt64, frame::HTTP3.
         end
 
     elseif frame isa HTTP3.HTTP3HeadersFrame
-        println("🌐 Received HTTP/3 HEADERS frame on stream $stream_id")
+        println(" Received HTTP/3 HEADERS frame on stream $stream_id")
         headers = HTTP3.decode_headers_qpack(frame.encoded_headers)
 
         # Check if this is a request or response
@@ -868,7 +868,7 @@ function process_http3_frame!(conn::Connection, stream_id::UInt64, frame::HTTP3.
         end
 
     elseif frame isa HTTP3.HTTP3DataFrame
-        println("🌐 Received HTTP/3 DATA frame on stream $stream_id: $(length(frame.data)) bytes")
+        println(" Received HTTP/3 DATA frame on stream $stream_id: $(length(frame.data)) bytes")
         if haskey(conn.http3.request_streams, stream_id)
             HTTP3.add_request_data!(conn.http3, stream_id, frame.data, false)
         end
@@ -879,11 +879,11 @@ function process_http3_frame!(conn::Connection, stream_id::UInt64, frame::HTTP3.
         end
 
     elseif frame isa HTTP3.HTTP3GoAwayFrame
-        println("🌐 Received HTTP/3 GOAWAY frame: stream $(frame.stream_id)")
+        println(" Received HTTP/3 GOAWAY frame: stream $(frame.stream_id)")
         conn.http3.goaway_received = true
 
     else
-        println("🌐 Received HTTP/3 frame: $(typeof(frame))")
+        println(" Received HTTP/3 frame: $(typeof(frame))")
     end
 end
 

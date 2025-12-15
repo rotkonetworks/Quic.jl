@@ -47,38 +47,38 @@ function create_authenticated_client(host::String=DEFAULT_HOST, port::Int=DEFAUL
         false, false, 0  # bidirectional stream for auth
     )
 
-    println("🎯 Target server: $host:$port")
+    println(" Target server: $host:$port")
     println()
 
     return client
 end
 
 function establish_quic_connection!(client::AuthenticatedQuicNetClient)
-    println("📤 Phase 1: Establishing QUIC connection...")
+    println(" Phase 1: Establishing QUIC connection...")
 
     # Send Initial packet with ClientHello
     packet_data = create_initial_packet(client)
     send(client.socket, client.server_addr, client.server_port, packet_data)
-    println("   ✅ Initial packet sent")
+    println("    Initial packet sent")
 
     # Wait for handshake completion
     if wait_for_handshake(client)
         client.connected = true
-        println("   🤝 QUIC handshake completed!")
+        println("    QUIC handshake completed!")
         return true
     else
-        println("   ❌ QUIC handshake failed")
+        println("    QUIC handshake failed")
         return false
     end
 end
 
 function perform_quicnet_auth!(client::AuthenticatedQuicNetClient)
     if !client.connected
-        println("⚠️  Cannot authenticate - QUIC not connected")
+        println("  Cannot authenticate - QUIC not connected")
         return false
     end
 
-    println("\n📤 Phase 2: QuicNet Authentication...")
+    println("\n Phase 2: QuicNet Authentication...")
     println("   Initiating authentication on stream 0...")
 
     # Create authentication initiation message
@@ -89,9 +89,9 @@ function perform_quicnet_auth!(client::AuthenticatedQuicNetClient)
 
     # Send auth init on stream 0 (bidirectional)
     if send_on_stream(client, 0, auth_init)
-        println("   ✅ Authentication initiated")
+        println("    Authentication initiated")
     else
-        println("   ❌ Failed to send auth init")
+        println("    Failed to send auth init")
         return false
     end
 
@@ -100,20 +100,20 @@ function perform_quicnet_auth!(client::AuthenticatedQuicNetClient)
     response = receive_stream_data(client, 0, 5000)
 
     if response !== nothing
-        println("   📥 Received auth response: $(length(response)) bytes")
+        println("    Received auth response: $(length(response)) bytes")
 
         # Process auth response
         reply = Quic.QuicNetProtocol.process_auth_message(client.auth, response)
 
         if reply !== nothing
-            println("   📤 Sending auth reply: $(length(reply)) bytes")
+            println("    Sending auth reply: $(length(reply)) bytes")
             send_on_stream(client, 0, reply)
         end
 
         if client.auth.authenticated
             client.authenticated = true
             peer_id = Quic.QuicNetProtocol.peer_id_from_pubkey(client.auth.peer_id.pubkey)
-            println("   🎉 Authenticated with peer: $(peer_id[1:8])...")
+            println("    Authenticated with peer: $(peer_id[1:8])...")
             return true
         else
             println("   ⏳ Authentication in progress...")
@@ -123,7 +123,7 @@ function perform_quicnet_auth!(client::AuthenticatedQuicNetClient)
             if final_msg !== nothing && client.auth.authenticated
                 client.authenticated = true
                 peer_id = Quic.QuicNetProtocol.peer_id_from_pubkey(client.auth.peer_id.pubkey)
-                println("   🎉 Authenticated with peer: $(peer_id[1:8])...")
+                println("    Authenticated with peer: $(peer_id[1:8])...")
                 return true
             end
         end
@@ -136,11 +136,11 @@ end
 
 function open_quicnet_channel!(client::AuthenticatedQuicNetClient, channel_type::Symbol)
     if !client.authenticated
-        println("⚠️  Cannot open channel - not authenticated")
+        println("  Cannot open channel - not authenticated")
         return false
     end
 
-    println("\n📤 Phase 3: Opening QuicNet $channel_type channel...")
+    println("\n Phase 3: Opening QuicNet $channel_type channel...")
 
     # Create channel open message
     data = Dict{Symbol, Any}()
@@ -156,18 +156,18 @@ function open_quicnet_channel!(client::AuthenticatedQuicNetClient, channel_type:
     # Open new stream for channel
     stream_id = get_next_stream_id(client)
     if send_on_stream(client, stream_id, channel_msg)
-        println("   ✅ Channel open request sent on stream $stream_id")
+        println("    Channel open request sent on stream $stream_id")
 
         # Wait for channel confirmation
         response = receive_stream_data(client, stream_id, 3000)
         if response !== nothing
-            println("   ✅ Channel opened successfully!")
+            println("    Channel opened successfully!")
             return true
         else
             println("   ⏰ Timeout waiting for channel confirmation")
         end
     else
-        println("   ❌ Failed to send channel open")
+        println("    Failed to send channel open")
     end
 
     return false
@@ -362,7 +362,7 @@ function get_next_stream_id(client::AuthenticatedQuicNetClient)
 end
 
 function run_authenticated_test(host::String=DEFAULT_HOST, port::Int=DEFAULT_PORT)
-    println("🧪 Testing Full QuicNet Authentication Protocol")
+    println(" Testing Full QuicNet Authentication Protocol")
     println("="^50)
 
     client = create_authenticated_client(host, port)
@@ -370,7 +370,7 @@ function run_authenticated_test(host::String=DEFAULT_HOST, port::Int=DEFAULT_POR
     try
         # Phase 1: QUIC connection
         if !establish_quic_connection!(client)
-            println("\n❌ Failed to establish QUIC connection")
+            println("\n Failed to establish QUIC connection")
             println("\nTroubleshooting:")
             println("1. Ensure Rust QuicNet server is running:")
             println("   quicnet -l -v")
@@ -379,7 +379,7 @@ function run_authenticated_test(host::String=DEFAULT_HOST, port::Int=DEFAULT_POR
 
         # Phase 2: QuicNet authentication
         if !perform_quicnet_auth!(client)
-            println("\n⚠️  Authentication failed or incomplete")
+            println("\n  Authentication failed or incomplete")
             println("Note: QuicNet uses Ed25519 signatures")
             println("Our implementation uses simplified HMAC for demo")
             return
@@ -387,12 +387,12 @@ function run_authenticated_test(host::String=DEFAULT_HOST, port::Int=DEFAULT_POR
 
         # Phase 3: Open channel
         if open_quicnet_channel!(client, :shell)
-            println("\n✅ Successfully established authenticated QuicNet connection!")
+            println("\n Successfully established authenticated QuicNet connection!")
         else
-            println("\n⚠️  Channel opening not confirmed")
+            println("\n  Channel opening not confirmed")
         end
 
-        println("\n📊 Connection Summary:")
+        println("\n Connection Summary:")
         println("   QUIC: Connected ✓")
         println("   QuicNet Auth: $(client.authenticated ? "Authenticated ✓" : "Not authenticated ✗")")
         println("   Protocol: QuicNet over QUIC v1")

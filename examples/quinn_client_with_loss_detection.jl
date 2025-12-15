@@ -8,7 +8,7 @@ using Quic
 using Sockets
 
 function main()
-    println("🚀 Starting Quinn client with loss detection...")
+    println(" Starting Quinn client with loss detection...")
 
     # create client socket
     client_addr = Sockets.InetAddr(ip"0.0.0.0", 0)
@@ -29,11 +29,11 @@ function main()
     conn.crypto.cipher_suite = Quic.Crypto.ChaCha20Poly1305()
     Quic.Crypto.derive_initial_secrets!(conn.crypto, conn.remote_cid.data)
 
-    println("🔐 Initialized ChaCha20-Poly1305 encryption")
+    println(" Initialized ChaCha20-Poly1305 encryption")
     println("   Initial keys derived from DCID: $(bytes2hex(conn.remote_cid.data))")
 
     # initiate handshake
-    println("🤝 Starting TLS 1.3 handshake...")
+    println(" Starting TLS 1.3 handshake...")
     Quic.ConnectionModule.initiate_handshake(conn, "localhost")
 
     # track handshake progress
@@ -55,7 +55,7 @@ function main()
             nbytes, from = recvfrom(conn.socket, data, timeout=1.0)
 
             if nbytes > 0
-                println("📥 Received $(nbytes) bytes from $(from)")
+                println(" Received $(nbytes) bytes from $(from)")
 
                 # process the packet
                 result = Quic.PacketReceiver.process_incoming_packet(
@@ -63,12 +63,12 @@ function main()
                 )
 
                 if result !== nothing
-                    println("✅ Processed packet type: $(result)")
+                    println(" Processed packet type: $(result)")
 
                     # check if handshake completed
                     if conn.connected
                         handshake_complete = true
-                        println("🎉 Handshake completed successfully!")
+                        println(" Handshake completed successfully!")
                         break
                     end
 
@@ -85,7 +85,7 @@ function main()
                     Quic.ConnectionModule.queue_frame!(conn, ack_frame, Quic.PacketCoalescing.Application)
                     Quic.ConnectionModule.flush_packets!(conn)
 
-                    println("📤 Sent ACK for packet $(conn.next_recv_pn.value - 1)")
+                    println(" Sent ACK for packet $(conn.next_recv_pn.value - 1)")
                 end
             end
 
@@ -95,15 +95,15 @@ function main()
                 println("⏰ Timeout, checking loss detection...")
 
                 if Quic.LossDetection.should_send_probe_packets(conn.loss_detection)
-                    println("🔄 Sending probe packets due to timeout")
+                    println(" Sending probe packets due to timeout")
                     Quic.ConnectionModule.handle_loss_detection_timeout(conn)
                     handshake_packets_sent += 1
                 end
 
                 retry_count += 1
-                println("🔄 Retry $(retry_count)/$(max_retries)")
+                println(" Retry $(retry_count)/$(max_retries)")
             else
-                println("❌ Error: $e")
+                println(" Error: $e")
                 break
             end
         end
@@ -113,7 +113,7 @@ function main()
 
     # test data transfer if handshake succeeded
     if handshake_complete
-        println("\n🔄 Testing reliable data transfer...")
+        println("\n Testing reliable data transfer...")
 
         # open a bidirectional stream
         stream_id = Quic.ConnectionModule.open_stream(conn, true)
@@ -122,13 +122,13 @@ function main()
         # send test data with loss detection
         test_data = Vector{UInt8}("Hello Quinn from Julia QUIC with loss detection!")
         bytes_sent = Quic.ConnectionModule.send_stream(conn, stream_id, test_data, false)
-        println("📤 Sent $(bytes_sent) bytes: \"$(String(test_data))\"")
+        println(" Sent $(bytes_sent) bytes: \"$(String(test_data))\"")
 
         # wait for potential ACK of stream data
         try
             nbytes, from = recvfrom(conn.socket, data, timeout=2.0)
             if nbytes > 0
-                println("📥 Received response: $(nbytes) bytes")
+                println(" Received response: $(nbytes) bytes")
                 Quic.PacketReceiver.process_incoming_packet(conn, data[1:nbytes], from)
             end
         catch
@@ -138,10 +138,10 @@ function main()
         # send final data with FIN
         final_data = Vector{UInt8}(" [FIN]")
         Quic.ConnectionModule.send_stream(conn, stream_id, final_data, true)
-        println("📤 Sent final data with FIN flag")
+        println(" Sent final data with FIN flag")
 
         # display loss detection statistics
-        println("\n📊 Loss Detection Statistics:")
+        println("\n Loss Detection Statistics:")
         println("   Smoothed RTT: $(conn.loss_detection.smoothed_rtt ÷ 1_000_000) ms")
         println("   Latest RTT: $(conn.loss_detection.latest_rtt ÷ 1_000_000) ms")
         println("   Min RTT: $(conn.loss_detection.min_rtt ÷ 1_000_000) ms")
@@ -155,11 +155,11 @@ function main()
             println("   $(space_name) space: $(length(space.sent_packets)) unacked packets")
         end
 
-        println("\n✅ Quinn compatibility test completed successfully!")
-        println("🔗 Full QUIC connection established with loss detection")
+        println("\n Quinn compatibility test completed successfully!")
+        println(" Full QUIC connection established with loss detection")
     else
-        println("\n❌ Handshake failed after $(max_retries) retries")
-        println("📊 Loss detection statistics:")
+        println("\n Handshake failed after $(max_retries) retries")
+        println(" Loss detection statistics:")
         println("   PTO count: $(conn.loss_detection.pto_count)")
         println("   Timer state: $(conn.loss_detection.loss_detection_timer !== nothing ? "active" : "inactive")")
     end

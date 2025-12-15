@@ -29,14 +29,14 @@ end
 
 function start_server!(server::QuicServer)
     server.running = true
-    println("🚀 QUIC Server starting on port $(getsockname(server.endpoint.socket)[2])...")
-    println("📊 Server capabilities:")
-    println("   ✅ TLS 1.3 handshake with X25519 ECDHE")
-    println("   ✅ ChaCha20-Poly1305 & AES-GCM encryption")
-    println("   ✅ Loss detection and recovery")
-    println("   ✅ Packet pacing and congestion control")
-    println("   ✅ Connection ID rotation")
-    println("   ✅ Bidirectional streams")
+    println(" QUIC Server starting on port $(getsockname(server.endpoint.socket)[2])...")
+    println(" Server capabilities:")
+    println("    TLS 1.3 handshake with X25519 ECDHE")
+    println("    ChaCha20-Poly1305 & AES-GCM encryption")
+    println("    Loss detection and recovery")
+    println("    Packet pacing and congestion control")
+    println("    Connection ID rotation")
+    println("    Bidirectional streams")
     println()
 
     # Main server loop
@@ -59,7 +59,7 @@ function start_server!(server::QuicServer)
                 # Timeout is normal, continue processing
                 continue
             else
-                println("❌ Server error: $e")
+                println(" Server error: $e")
                 break
             end
         end
@@ -92,7 +92,7 @@ function handle_client_packet!(server::QuicServer, packet_data::Vector{UInt8}, c
         end
 
     catch e
-        println("⚠️ Error handling packet from $client_addr: $e")
+        println(" Error handling packet from $client_addr: $e")
     end
 end
 
@@ -107,7 +107,7 @@ function extract_destination_cid(packet_data::Vector{UInt8})
 end
 
 function handle_new_connection!(server::QuicServer, packet_data::Vector{UInt8}, client_addr)
-    println("🤝 New connection attempt from $client_addr")
+    println(" New connection attempt from $client_addr")
 
     # Create new connection
     conn = Quic.ConnectionModule.Connection(server.endpoint.socket, false)  # server = false for is_client
@@ -129,7 +129,7 @@ function handle_new_connection!(server::QuicServer, packet_data::Vector{UInt8}, 
     result = Quic.PacketReceiver.process_incoming_packet(conn, packet_data, client_addr)
 
     if result !== nothing
-        println("✅ Initial packet processed: $result")
+        println(" Initial packet processed: $result")
         handle_connection_events!(server, conn, result)
     end
 end
@@ -145,11 +145,11 @@ function handle_connection_events!(server::QuicServer, conn::Quic.ConnectionModu
 
     # Handle completed handshake
     if conn.connected && !get(conn, :handshake_handled, false)
-        println("🎉 Handshake completed with $(conn.remote_addr)")
+        println(" Handshake completed with $(conn.remote_addr)")
 
         # Send a welcome message on a new stream
         welcome_stream = Quic.ConnectionModule.open_stream(conn, true)
-        welcome_msg = Vector{UInt8}("Hello from Julia QUIC Server! 🚀")
+        welcome_msg = Vector{UInt8}("Hello from Julia QUIC Server! ")
         Quic.ConnectionModule.send_stream(conn, welcome_stream, welcome_msg, false)
 
         # Mark handshake as handled
@@ -162,7 +162,7 @@ function handle_connection_events!(server::QuicServer, conn::Quic.ConnectionModu
             streams_opened = server.stats.streams_opened + 1
         )
 
-        println("📤 Sent welcome message on stream $(welcome_stream.value)")
+        println(" Sent welcome message on stream $(welcome_stream.value)")
     end
 
     # Handle incoming stream data
@@ -181,7 +181,7 @@ function handle_stream_data!(server::QuicServer, conn::Quic.ConnectionModule.Con
 
     if !isempty(data)
         message = String(data)
-        println("📥 Received on stream $stream_id: \"$message\"")
+        println(" Received on stream $stream_id: \"$message\"")
 
         server.stats = (
             connections_accepted = server.stats.connections_accepted,
@@ -191,7 +191,7 @@ function handle_stream_data!(server::QuicServer, conn::Quic.ConnectionModule.Con
         )
 
         # Echo back with server processing
-        response_data = Vector{UInt8}("Server processed: \"$message\" ✅")
+        response_data = Vector{UInt8}("Server processed: \"$message\" ")
 
         # Send response on the same stream
         sid = Quic.Stream.StreamId(stream_id, :server, :bidi)
@@ -204,7 +204,7 @@ function handle_stream_data!(server::QuicServer, conn::Quic.ConnectionModule.Con
             streams_opened = server.stats.streams_opened
         )
 
-        println("📤 Sent response: \"$(String(response_data))\"")
+        println(" Sent response: \"$(String(response_data))\"")
     end
 end
 
@@ -223,12 +223,12 @@ function process_active_connections!(server::QuicServer)
 
             # Check for connection timeout or closure
             if conn.closing
-                println("👋 Connection $(bytes2hex(cid.data)) closing")
+                println(" Connection $(bytes2hex(cid.data)) closing")
                 delete!(server.active_connections, cid)
             end
 
         catch e
-            println("⚠️ Error processing connection $(bytes2hex(cid.data)): $e")
+            println(" Error processing connection $(bytes2hex(cid.data)): $e")
             delete!(server.active_connections, cid)
         end
     end
@@ -240,7 +240,7 @@ function stop_server!(server::QuicServer)
 end
 
 function print_server_stats(server::QuicServer)
-    println("\n📊 Server Statistics:")
+    println("\n Server Statistics:")
     println("   Active connections: $(length(server.active_connections))")
     println("   Total connections: $(server.stats.connections_accepted)")
     println("   Bytes received: $(server.stats.bytes_received)")

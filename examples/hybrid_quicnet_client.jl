@@ -14,29 +14,29 @@ const DEFAULT_HOST = "127.0.0.1"
 # So let's try a different approach - use command line tools
 
 function test_with_curl_http3()
-    println("🌐 Testing QUIC connection with curl (if HTTP/3 enabled)")
+    println(" Testing QUIC connection with curl (if HTTP/3 enabled)")
 
     # Check if curl has HTTP/3 support
     curl_version = read(`curl --version`, String)
     if contains(curl_version, "HTTP3") || contains(curl_version, "nghttp3")
-        println("✅ curl has HTTP/3 support")
+        println(" curl has HTTP/3 support")
 
         # Try to connect
         try
             result = read(`curl --http3 https://127.0.0.1:4433/ -k`, String)
             println("Response: ", result)
         catch e
-            println("❌ Connection failed: ", e)
+            println(" Connection failed: ", e)
         end
     else
-        println("❌ curl doesn't have HTTP/3 support")
+        println(" curl doesn't have HTTP/3 support")
         println("   Install with: brew install curl --with-nghttp3")
     end
 end
 
 # Use openssl s_client for QUIC (if available in OpenSSL 3.2+)
 function test_with_openssl_quic()
-    println("\n🔐 Testing with OpenSSL QUIC (if available)")
+    println("\n Testing with OpenSSL QUIC (if available)")
 
     # Check OpenSSL version
     openssl_version = read(`openssl version`, String)
@@ -50,7 +50,7 @@ function test_with_openssl_quic()
         run(`openssl genpkey -algorithm ED25519 -out /tmp/client.key`)
         run(`openssl req -new -x509 -key /tmp/client.key -days 365 -subj "/CN=QuicNet-Julia" -out /tmp/client.crt`)
 
-        println("   ✅ Certificate generated")
+        println("    Certificate generated")
 
         # Try QUIC connection with client cert
         # Note: OpenSSL QUIC support is experimental
@@ -69,13 +69,13 @@ function test_with_openssl_quic()
             println("   Note: OpenSSL QUIC is experimental")
         end
     else
-        println("   ❌ OpenSSL 3.2+ required for QUIC support")
+        println("    OpenSSL 3.2+ required for QUIC support")
     end
 end
 
 # The real solution: Create a minimal QUIC client using picoquic C library
 function create_picoquic_binding()
-    println("\n📦 Ideal solution: Use picoquic C library")
+    println("\n Ideal solution: Use picoquic C library")
     println("   This would require:")
     println("   1. Building picoquic as a shared library")
     println("   2. Creating Julia FFI bindings")
@@ -83,7 +83,7 @@ function create_picoquic_binding()
 
     # Check if picoquic is available
     if isdir("/tmp/picoquic")
-        println("   ✅ picoquic source available at /tmp/picoquic")
+        println("    picoquic source available at /tmp/picoquic")
         println("   Next steps:")
         println("   - cd /tmp/picoquic && cmake . && make")
         println("   - Create Julia ccall bindings to picoquic functions")
@@ -94,16 +94,16 @@ end
 
 # Our hybrid approach summary
 function show_hybrid_strategy()
-    println("\n🎯 Hybrid Strategy for QuicNet Compatibility")
+    println("\n Hybrid Strategy for QuicNet Compatibility")
     println("="^50)
 
-    println("\n📊 Rust QuicNet uses:")
+    println("\n Rust QuicNet uses:")
     println("   • quinn (QUIC protocol)")
     println("   • rustls (TLS 1.3 with client certs)")
     println("   • rcgen (X.509 certificate generation)")
     println("   • ed25519-dalek (Ed25519 crypto)")
 
-    println("\n🔧 Our Julia options:")
+    println("\n Our Julia options:")
     println("\n1. Use C library (recommended):")
     println("   • picoquic or ngtcp2 for QUIC")
     println("   • OpenSSL for TLS 1.3")
@@ -119,13 +119,13 @@ function show_hybrid_strategy()
     println("   • OpenSSL for cert generation")
     println("   • Need to add Certificate message to handshake")
 
-    println("\n✨ Best path forward:")
+    println("\n Best path forward:")
     println("   Create Julia bindings to picoquic (like Rust uses quinn)")
     println("   This gives us full QUIC + TLS 1.3 + client certs")
 end
 
 function main()
-    println("🚀 Hybrid QuicNet Client Test")
+    println(" Hybrid QuicNet Client Test")
     println("="^50)
 
     # Show our strategy

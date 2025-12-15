@@ -45,20 +45,20 @@ function create_ed25519_client(host::String=DEFAULT_HOST, port::Int=DEFAULT_PORT
 
     # Set client certificate in handshake
     Quic.Handshake.set_client_certificate(conn.handshake, identity.keypair)
-    println("✅ Client certificate configured")
+    println(" Client certificate configured")
 
     client = QuicNetED25519Client(
         sock, conn, identity, server_ip, port, false
     )
 
-    println("🎯 Target server: $host:$port")
+    println(" Target server: $host:$port")
     println()
 
     return client
 end
 
 function send_initial_with_cert!(client::QuicNetED25519Client)
-    println("📤 Sending Initial packet with Ed25519 support...")
+    println(" Sending Initial packet with Ed25519 support...")
 
     # Create ClientHello with Ed25519 in signature algorithms
     client_hello = Quic.Handshake.create_client_hello(
@@ -125,7 +125,7 @@ function send_initial_with_cert!(client::QuicNetED25519Client)
 
     # Send packet
     send(client.socket, client.server_addr, client.server_port, packet_data)
-    println("   ✅ Initial packet sent with Ed25519 support")
+    println("    Initial packet sent with Ed25519 support")
 
     return packet_data
 end
@@ -169,7 +169,7 @@ function encode_varint(value::Int)
 end
 
 function wait_for_response!(client::QuicNetED25519Client, timeout_ms::Int=5000)
-    println("\n📥 Waiting for server response...")
+    println("\n Waiting for server response...")
 
     start_time = time() * 1000
     packets_received = 0
@@ -184,7 +184,7 @@ function wait_for_response!(client::QuicNetED25519Client, timeout_ms::Int=5000)
                 if n > 0
                     packets_received += 1
                     data = data[1:n]
-                    println("   📦 Received packet: $(n) bytes")
+                    println("    Received packet: $(n) bytes")
 
                     # Parse packet header
                     header_byte = data[1]
@@ -199,7 +199,7 @@ function wait_for_response!(client::QuicNetED25519Client, timeout_ms::Int=5000)
                             println("      Type: Handshake")
 
                             # Check if this might be a certificate request
-                            println("      🔐 Server may be requesting client certificate")
+                            println("       Server may be requesting client certificate")
                         end
                     else
                         println("      Short header packet")
@@ -215,7 +215,7 @@ function wait_for_response!(client::QuicNetED25519Client, timeout_ms::Int=5000)
 
         catch e
             if !isa(e, Base.IOError)
-                println("   ⚠️  Error: $e")
+                println("     Error: $e")
             end
             break
         end
@@ -226,14 +226,14 @@ function wait_for_response!(client::QuicNetED25519Client, timeout_ms::Int=5000)
         println("\n   ℹ️  QuicNet requires mutual TLS with Ed25519 certificates")
         println("   The server expects client certificates during handshake")
     else
-        println("   📊 Total packets received: $packets_received")
+        println("    Total packets received: $packets_received")
     end
 
     return packets_received > 0
 end
 
 function run_ed25519_test(host::String=DEFAULT_HOST, port::Int=DEFAULT_PORT)
-    println("🧪 Testing QuicNet with Ed25519 Client Certificates")
+    println(" Testing QuicNet with Ed25519 Client Certificates")
     println("="^50)
 
     client = create_ed25519_client(host, port)
@@ -244,17 +244,17 @@ function run_ed25519_test(host::String=DEFAULT_HOST, port::Int=DEFAULT_PORT)
 
         # Wait for response
         if wait_for_response!(client)
-            println("\n✅ Received response from server!")
+            println("\n Received response from server!")
 
             if client.connected
-                println("🤝 Connection established")
+                println(" Connection established")
                 println("\nConnection details:")
                 println("   Protocol: QUIC v1")
                 println("   Client cert: Ed25519 X.509")
                 println("   Signature algorithm: Ed25519")
             end
         else
-            println("\n❌ No response from server")
+            println("\n No response from server")
             println("\nDiagnostic info:")
             println("   - Ed25519 signature algorithm included: ✓")
             println("   - X.509 certificate generated: ✓")
@@ -266,7 +266,7 @@ function run_ed25519_test(host::String=DEFAULT_HOST, port::Int=DEFAULT_PORT)
 
     finally
         close(client.socket)
-        println("\n📊 Connection closed")
+        println("\n Connection closed")
     end
 end
 

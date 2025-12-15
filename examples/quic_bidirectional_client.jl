@@ -30,7 +30,7 @@ mutable struct QuicClient
 end
 
 function connect_to_server!(client::QuicClient, server_host::String = "127.0.0.1", server_port::Int = 4433)
-    println("🔗 Connecting to QUIC server at $server_host:$server_port...")
+    println(" Connecting to QUIC server at $server_host:$server_port...")
 
     # Create connection
     server_addr = Sockets.InetAddr(ip"127.0.0.1", server_port)
@@ -40,13 +40,13 @@ function connect_to_server!(client::QuicClient, server_host::String = "127.0.0.1
     client.connection.crypto.cipher_suite = Quic.Crypto.ChaCha20Poly1305()
     Quic.Crypto.derive_initial_secrets!(client.connection.crypto, client.connection.remote_cid.data)
 
-    println("🔐 Crypto initialized: ChaCha20-Poly1305")
+    println(" Crypto initialized: ChaCha20-Poly1305")
     println("   Local CID: $(bytes2hex(client.connection.local_cid.data))")
     println("   Remote CID: $(bytes2hex(client.connection.remote_cid.data))")
 
     # Start handshake
     handshake_start = time_ns()
-    println("🤝 Initiating TLS 1.3 handshake...")
+    println(" Initiating TLS 1.3 handshake...")
     Quic.ConnectionModule.initiate_handshake(client.connection, "localhost")
 
     # Wait for handshake completion
@@ -63,7 +63,7 @@ function connect_to_server!(client::QuicClient, server_host::String = "127.0.0.1
             nbytes, from = recvfrom(client.connection.socket, data, timeout=1.0)
 
             if nbytes > 0
-                println("📥 Received $(nbytes) bytes during handshake")
+                println(" Received $(nbytes) bytes during handshake")
 
                 # Process packet
                 result = Quic.PacketReceiver.process_incoming_packet(
@@ -81,7 +81,7 @@ function connect_to_server!(client::QuicClient, server_host::String = "127.0.0.1
                         messages_received = client.stats.messages_received
                     )
 
-                    println("🎉 Handshake completed in $(round(handshake_time, digits=2)) ms!")
+                    println(" Handshake completed in $(round(handshake_time, digits=2)) ms!")
                     break
                 end
             end
@@ -90,11 +90,11 @@ function connect_to_server!(client::QuicClient, server_host::String = "127.0.0.1
             if isa(e, Base.UVError) && e.code == Base.UV_ETIMEDOUT
                 # Check for timeout retransmissions
                 if Quic.LossDetection.should_send_probe_packets(client.connection.loss_detection)
-                    println("🔄 Handshake timeout, retransmitting...")
+                    println(" Handshake timeout, retransmitting...")
                     Quic.ConnectionModule.handle_loss_detection_timeout(client.connection)
                 end
             else
-                println("❌ Handshake error: $e")
+                println(" Handshake error: $e")
                 return false
             end
         end
@@ -103,7 +103,7 @@ function connect_to_server!(client::QuicClient, server_host::String = "127.0.0.1
     end
 
     if !handshake_complete
-        println("❌ Handshake failed - timeout after $(max_handshake_time)s")
+        println(" Handshake failed - timeout after $(max_handshake_time)s")
         return false
     end
 
@@ -136,7 +136,7 @@ function process_incoming_data!(client::QuicClient)
 
         catch e
             if !isa(e, Base.UVError) || e.code != Base.UV_ETIMEDOUT
-                println("⚠️ Error receiving data: $e")
+                println(" Error receiving data: $e")
             end
             break
         end
@@ -148,7 +148,7 @@ function handle_received_data!(client::QuicClient, stream_id::UInt64, stream_sta
 
     if !isempty(data)
         message = String(data)
-        println("📥 Received on stream $stream_id: \"$message\"")
+        println(" Received on stream $stream_id: \"$message\"")
 
         # Update statistics
         client.stats = (
@@ -174,7 +174,7 @@ end
 
 function send_message!(client::QuicClient, message::String, stream_id::Union{Quic.Stream.StreamId, Nothing} = nothing)
     if client.connection === nothing || !client.connection.connected
-        println("❌ No active connection to send message")
+        println(" No active connection to send message")
         return false
     end
 
@@ -191,7 +191,7 @@ function send_message!(client::QuicClient, message::String, stream_id::Union{Qui
     bytes_sent = Quic.ConnectionModule.send_stream(client.connection, stream_id, message_data, false)
 
     if bytes_sent > 0
-        println("📤 Sent $(bytes_sent) bytes on stream $(stream_id.value): \"$message\"")
+        println(" Sent $(bytes_sent) bytes on stream $(stream_id.value): \"$message\"")
 
         # Update statistics
         client.stats = (
@@ -212,7 +212,7 @@ function send_message!(client::QuicClient, message::String, stream_id::Union{Qui
         return true
     end
 
-    println("❌ Failed to send message")
+    println(" Failed to send message")
     return false
 end
 
@@ -221,7 +221,7 @@ function send_and_wait_response!(client::QuicClient, message::String; timeout_s:
     stream_id = Quic.ConnectionModule.open_stream(client.connection, true)
     client.streams[stream_id.value] = (sent_messages = 0, received_messages = 0)
 
-    println("🔄 Request-Response on stream $(stream_id.value)")
+    println(" Request-Response on stream $(stream_id.value)")
 
     # Send message
     if !send_message!(client, message, stream_id)
@@ -252,7 +252,7 @@ function send_and_wait_response!(client::QuicClient, message::String; timeout_s:
                         response_data, _ = Quic.Stream.read_stream!(stream_state, length(stream_state.recv_buf))
                         if !isempty(response_data)
                             response = String(response_data)
-                            println("📥 Response: \"$response\"")
+                            println(" Response: \"$response\"")
 
                             # Update stats
                             client.stats = (
@@ -271,7 +271,7 @@ function send_and_wait_response!(client::QuicClient, message::String; timeout_s:
 
         catch e
             if !isa(e, Base.UVError) || e.code != Base.UV_ETIMEDOUT
-                println("⚠️ Error waiting for response: $e")
+                println(" Error waiting for response: $e")
                 break
             end
         end
@@ -284,11 +284,11 @@ function send_and_wait_response!(client::QuicClient, message::String; timeout_s:
 end
 
 function demonstrate_bidirectional_communication!(client::QuicClient)
-    println("\n🔄 Demonstrating bidirectional communication...")
+    println("\n Demonstrating bidirectional communication...")
 
     # Test 1: Simple message exchange
     println("\n📋 Test 1: Simple message exchange")
-    response1 = send_and_wait_response!(client, "Hello from Julia QUIC client! 👋")
+    response1 = send_and_wait_response!(client, "Hello from Julia QUIC client! ")
 
     # Test 2: Multiple streams
     println("\n📋 Test 2: Multiple concurrent streams")
@@ -301,9 +301,9 @@ function demonstrate_bidirectional_communication!(client::QuicClient)
     client.streams[stream3.value] = (sent_messages = 0, received_messages = 0)
 
     # Send on multiple streams
-    send_message!(client, "Stream 1: Technical data 🔧", stream1)
+    send_message!(client, "Stream 1: Technical data ", stream1)
     send_message!(client, "Stream 2: User message 👤", stream2)
-    send_message!(client, "Stream 3: Binary data ⚡", stream3)
+    send_message!(client, "Stream 3: Binary data ", stream3)
 
     # Wait for responses
     println("⏳ Waiting for responses on multiple streams...")
@@ -311,7 +311,7 @@ function demonstrate_bidirectional_communication!(client::QuicClient)
 
     # Test 3: Large data transfer
     println("\n📋 Test 3: Large data transfer")
-    large_message = "Large data: " * "X" * 1000 * " 📊"
+    large_message = "Large data: " * "X" * 1000 * " "
     response3 = send_and_wait_response!(client, large_message, timeout_s=10.0)
 
     # Test 4: Rapid fire messages
@@ -320,7 +320,7 @@ function demonstrate_bidirectional_communication!(client::QuicClient)
     client.streams[burst_stream.value] = (sent_messages = 0, received_messages = 0)
 
     for i in 1:5
-        send_message!(client, "Burst message #$i ⚡", burst_stream)
+        send_message!(client, "Burst message #$i ", burst_stream)
         sleep(0.1)  # Small delay between messages
     end
 
@@ -333,7 +333,7 @@ function demonstrate_bidirectional_communication!(client::QuicClient)
 end
 
 function print_client_stats(client::QuicClient)
-    println("\n📊 Client Statistics:")
+    println("\n Client Statistics:")
     println("   Handshake time: $(round(client.stats.handshake_time_ms, digits=2)) ms")
     println("   Total bytes sent: $(client.stats.total_bytes_sent)")
     println("   Total bytes received: $(client.stats.total_bytes_received)")
@@ -346,14 +346,14 @@ function print_client_stats(client::QuicClient)
         loss_stats = Quic.ConnectionModule.get_cid_statistics(client.connection)
         pacing_stats = Quic.ConnectionModule.get_pacing_statistics(client.connection)
 
-        println("\n📊 Network Statistics:")
+        println("\n Network Statistics:")
         println("   RTT: $(client.connection.loss_detection.smoothed_rtt ÷ 1_000_000) ms")
         println("   CWND: $(client.connection.cwnd) bytes")
         println("   Pacing rate: $(Int(pacing_stats.pacing_rate)) bytes/sec")
         println("   Bytes in flight: $(client.connection.loss_detection.bytes_in_flight)")
         println("   PTO count: $(client.connection.loss_detection.pto_count)")
 
-        println("\n📊 Stream Statistics:")
+        println("\n Stream Statistics:")
         for (stream_id, stats) in client.streams
             println("   Stream $stream_id: sent=$(stats.sent_messages), received=$(stats.received_messages)")
         end
@@ -367,7 +367,7 @@ function disconnect!(client::QuicClient)
         Quic.ConnectionModule.queue_frame!(client.connection, close_frame, Quic.PacketCoalescing.Application)
         Quic.ConnectionModule.flush_packets!(client.connection)
 
-        println("👋 Sent connection close frame")
+        println(" Sent connection close frame")
     end
 
     close(client.endpoint.socket)
@@ -380,7 +380,7 @@ function main()
     try
         # Connect to server
         if !connect_to_server!(client)
-            println("❌ Failed to connect to server")
+            println(" Failed to connect to server")
             return false
         end
 
@@ -390,10 +390,10 @@ function main()
         # Print final statistics
         print_client_stats(client)
 
-        println("\n✅ Bidirectional QUIC communication demonstration completed!")
+        println("\n Bidirectional QUIC communication demonstration completed!")
 
     catch e
-        println("❌ Client error: $e")
+        println(" Client error: $e")
         return false
     finally
         disconnect!(client)

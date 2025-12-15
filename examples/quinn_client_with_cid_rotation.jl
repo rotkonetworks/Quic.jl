@@ -8,7 +8,7 @@ using Quic
 using Sockets
 
 function main()
-    println("🚀 Starting Quinn client with connection ID rotation...")
+    println(" Starting Quinn client with connection ID rotation...")
 
     # create client socket
     client_addr = Sockets.InetAddr(ip"0.0.0.0", 0)
@@ -26,7 +26,7 @@ function main()
 
     # Display initial CID manager stats
     initial_stats = Quic.ConnectionModule.get_cid_statistics(conn)
-    println("📊 Initial CID statistics:")
+    println(" Initial CID statistics:")
     println("   Active local CIDs: $(initial_stats.active_local_cids)")
     println("   Active remote CIDs: $(initial_stats.active_remote_cids)")
 
@@ -34,10 +34,10 @@ function main()
     conn.crypto.cipher_suite = Quic.Crypto.ChaCha20Poly1305()
     Quic.Crypto.derive_initial_secrets!(conn.crypto, conn.remote_cid.data)
 
-    println("🔐 Initialized ChaCha20-Poly1305 encryption")
+    println(" Initialized ChaCha20-Poly1305 encryption")
 
     # initiate handshake
-    println("🤝 Starting TLS 1.3 handshake...")
+    println(" Starting TLS 1.3 handshake...")
     Quic.ConnectionModule.initiate_handshake(conn, "localhost")
 
     # track handshake progress
@@ -61,7 +61,7 @@ function main()
             nbytes, from = recvfrom(conn.socket, data, timeout=1.0)
 
             if nbytes > 0
-                println("📥 Received $(nbytes) bytes from $(from)")
+                println(" Received $(nbytes) bytes from $(from)")
 
                 # process the packet
                 result = Quic.PacketReceiver.process_incoming_packet(
@@ -69,12 +69,12 @@ function main()
                 )
 
                 if result !== nothing
-                    println("✅ Processed packet type: $(result)")
+                    println(" Processed packet type: $(result)")
 
                     # check if handshake completed
                     if conn.connected
                         handshake_complete = true
-                        println("🎉 Handshake completed successfully!")
+                        println(" Handshake completed successfully!")
                         break
                     end
                 end
@@ -84,14 +84,14 @@ function main()
             if isa(e, Base.UVError) && e.code == Base.UV_ETIMEDOUT
                 # timeout - check if we need to retransmit
                 if Quic.LossDetection.should_send_probe_packets(conn.loss_detection)
-                    println("🔄 Sending probe packets due to timeout")
+                    println(" Sending probe packets due to timeout")
                     Quic.ConnectionModule.handle_loss_detection_timeout(conn)
                 end
 
                 retry_count += 1
-                println("🔄 Retry $(retry_count)/$(max_retries)")
+                println(" Retry $(retry_count)/$(max_retries)")
             else
-                println("❌ Error: $e")
+                println(" Error: $e")
                 break
             end
         end
@@ -101,11 +101,11 @@ function main()
 
     # test connection ID rotation if handshake succeeded
     if handshake_complete
-        println("\n🔄 Testing connection ID rotation...")
+        println("\n Testing connection ID rotation...")
 
         # Display CID stats after handshake
         post_handshake_stats = Quic.ConnectionModule.get_cid_statistics(conn)
-        println("📊 Post-handshake CID statistics:")
+        println(" Post-handshake CID statistics:")
         println("   Active local CIDs: $(post_handshake_stats.active_local_cids)")
         println("   Active remote CIDs: $(post_handshake_stats.active_remote_cids)")
         println("   Total local issued: $(post_handshake_stats.total_local_issued)")
@@ -114,10 +114,10 @@ function main()
         stream_id = Quic.ConnectionModule.open_stream(conn, true)
         test_data = Vector{UInt8}("Hello before CID rotation!")
         Quic.ConnectionModule.send_stream(conn, stream_id, test_data, false)
-        println("📤 Sent test data: \"$(String(test_data))\"")
+        println(" Sent test data: \"$(String(test_data))\"")
 
         # Issue additional connection IDs
-        println("\n🆕 Issuing new connection IDs...")
+        println("\n Issuing new connection IDs...")
         new_cids_issued = Quic.ConnectionModule.maintain_connection_ids!(conn)
         println("   Issued $(new_cids_issued) new connection IDs")
 
@@ -127,7 +127,7 @@ function main()
             try
                 nbytes, from = recvfrom(conn.socket, data, timeout=1.0)
                 if nbytes > 0
-                    println("📥 Received $(nbytes) bytes (potential CID frames)")
+                    println(" Received $(nbytes) bytes (potential CID frames)")
                     Quic.PacketReceiver.process_incoming_packet(conn, data[1:nbytes], from)
                 end
             catch
@@ -137,7 +137,7 @@ function main()
         end
 
         # Attempt connection ID rotation (path migration)
-        println("\n🔄 Attempting connection ID rotation...")
+        println("\n Attempting connection ID rotation...")
         current_cid = conn.remote_cid
         println("   Current remote CID: $(bytes2hex(current_cid.data))")
 
@@ -145,12 +145,12 @@ function main()
 
         if rotation_success
             new_cid = conn.remote_cid
-            println("✅ Successfully rotated to new CID: $(bytes2hex(new_cid.data))")
+            println(" Successfully rotated to new CID: $(bytes2hex(new_cid.data))")
 
             # Test data transfer after rotation
             post_rotation_data = Vector{UInt8}("Hello after CID rotation!")
             Quic.ConnectionModule.send_stream(conn, stream_id, post_rotation_data, false)
-            println("📤 Sent post-rotation data: \"$(String(post_rotation_data))\"")
+            println(" Sent post-rotation data: \"$(String(post_rotation_data))\"")
 
             # Send PATH_CHALLENGE to test path validation
             challenge_data = rand(UInt8, 8)
@@ -163,7 +163,7 @@ function main()
             try
                 nbytes, from = recvfrom(conn.socket, data, timeout=2.0)
                 if nbytes > 0
-                    println("📥 Received response to PATH_CHALLENGE")
+                    println(" Received response to PATH_CHALLENGE")
                     Quic.PacketReceiver.process_incoming_packet(conn, data[1:nbytes], from)
                 end
             catch
@@ -171,12 +171,12 @@ function main()
             end
 
         else
-            println("❌ Connection ID rotation failed (no additional CIDs available)")
+            println(" Connection ID rotation failed (no additional CIDs available)")
         end
 
         # Display final CID statistics
         final_stats = Quic.ConnectionModule.get_cid_statistics(conn)
-        println("\n📊 Final CID statistics:")
+        println("\n Final CID statistics:")
         println("   Active local CIDs: $(final_stats.active_local_cids)")
         println("   Active remote CIDs: $(final_stats.active_remote_cids)")
         println("   Total local issued: $(final_stats.total_local_issued)")
@@ -190,12 +190,12 @@ function main()
         # Send final data with FIN
         final_data = Vector{UInt8}(" [CID rotation test complete]")
         Quic.ConnectionModule.send_stream(conn, stream_id, final_data, true)
-        println("📤 Sent final data with FIN")
+        println(" Sent final data with FIN")
 
-        println("\n✅ Connection ID rotation test completed!")
-        println("🔗 Full QUIC connection with CID management demonstrated")
+        println("\n Connection ID rotation test completed!")
+        println(" Full QUIC connection with CID management demonstrated")
     else
-        println("\n❌ Handshake failed after $(max_retries) retries")
+        println("\n Handshake failed after $(max_retries) retries")
     end
 
     # close connection

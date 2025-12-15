@@ -98,7 +98,7 @@ function quinn_client(host::String="localhost", port::Int=4433)
 
             if nbytes > 0
                 packet_data = data[1:nbytes]
-                println("\n📥 Received packet: $nbytes bytes from $from_addr")
+                println("\n Received packet: $nbytes bytes from $from_addr")
 
                 # process the packet
                 result = Quic.PacketReceiver.process_incoming_packet(conn, packet_data, from_addr)
@@ -107,35 +107,35 @@ function quinn_client(host::String="localhost", port::Int=4433)
                     packet_type, payload = result
 
                     if packet_type == :version_negotiation
-                        println("⚠️  Version negotiation required")
+                        println("  Version negotiation required")
                         # would restart with new version
                         break
 
                     elseif packet_type == :retry
-                        println("🔄 Retry required with token")
+                        println(" Retry required with token")
                         # would restart handshake with token
                         break
 
                     elseif packet_type == :initial
-                        println("✅ Processed Initial packet")
+                        println(" Processed Initial packet")
 
                         # check if handshake progressed
                         if conn.handshake.state == :completed
                             handshake_complete = true
-                            println("🎉 Handshake completed!")
+                            println(" Handshake completed!")
                         elseif conn.handshake.state != :initial
                             println("   Handshake state: $(conn.handshake.state)")
                         end
 
                     elseif packet_type == :handshake
-                        println("✅ Processed Handshake packet")
+                        println(" Processed Handshake packet")
 
                     elseif packet_type == :short
-                        println("✅ Processed 1-RTT packet")
+                        println(" Processed 1-RTT packet")
                         handshake_complete = true
                     end
                 else
-                    println("⚠️  Failed to process packet")
+                    println("  Failed to process packet")
                 end
             end
 
@@ -196,7 +196,7 @@ function quinn_client(host::String="localhost", port::Int=4433)
 
     # cleanup
     close(endpoint.socket)
-    println("\n✅ Client shutdown complete")
+    println("\n Client shutdown complete")
 end
 
 # Send PING frame to keep connection alive

@@ -67,15 +67,15 @@ end
 
 # Handle retry packet
 function handle_retry_packet(conn::ConnectionModule.Connection, header, data::Vector{UInt8})
-    println("📦 Processing Retry packet")
+    println(" Processing Retry packet")
 
     # verify integrity tag
     if !Retry.verify_retry_integrity_tag(data, conn.initial_dcid)
-        println("❌ Retry packet integrity check failed")
+        println(" Retry packet integrity check failed")
         return nothing
     end
 
-    println("✅ Retry packet integrity verified")
+    println(" Retry packet integrity verified")
 
     # update connection state
     conn.remote_cid = ConnectionId(header.scid)
@@ -95,7 +95,7 @@ function handle_retry_packet(conn::ConnectionModule.Connection, header, data::Ve
     derive_initial_secrets!(conn.crypto, conn.remote_cid.data)
 
     # restart handshake with retry token
-    println("🔄 Restarting handshake with retry token...")
+    println(" Restarting handshake with retry token...")
 
     # resend ClientHello with token
     if conn.is_client
@@ -178,7 +178,7 @@ function send_initial_with_token(conn::ConnectionModule.Connection, frame::QuicF
     # send packet
     if conn.remote_addr !== nothing
         send(conn.socket, conn.remote_addr.host, conn.remote_addr.port, buf)
-        println("📤 Sent Initial packet with retry token ($(length(buf)) bytes)")
+        println(" Sent Initial packet with retry token ($(length(buf)) bytes)")
     end
 
     # track sent packet
@@ -544,7 +544,7 @@ function derive_handshake_keys!(conn::ConnectionModule.Connection, shared_secret
     hs.handshake_keys[:server_iv] = hkdf_expand_label(server_hs_traffic, "quic iv", UInt8[], 12)
     hs.handshake_keys[:server_hp] = hkdf_expand_label(server_hs_traffic, "quic hp", UInt8[], key_len)
 
-    println("✅ Derived handshake keys for cipher suite 0x$(string(hs.cipher_suite, base=16))")
+    println(" Derived handshake keys for cipher suite 0x$(string(hs.cipher_suite, base=16))")
     println("   Client key: $(bytes2hex(hs.handshake_keys[:client_key][1:16]))...")
     println("   Server key: $(bytes2hex(hs.handshake_keys[:server_key][1:16]))...")
 
